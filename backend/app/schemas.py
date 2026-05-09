@@ -37,7 +37,10 @@ class SoilLayer(BaseModel):
 
 
 class WaterTable(BaseModel):
-    elevation: float = Field(..., description="Piezometric elevation in metres (z coordinate)")
+    elevation: Optional[float] = Field(
+        default=None,
+        description="Piezometric elevation in metres; None means no water table",
+    )
 
 
 class Circle(BaseModel):
@@ -127,6 +130,7 @@ class AnalysisResult(BaseModel):
     slices: list[Slice]
     converged: bool
     iterations: int = Field(..., ge=0)
+    elapsed_seconds: float = Field(default=0.0, ge=0, description="Wall-clock calculation time in seconds")
     circle: Circle
 
 

@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS: SpencerSettings = {
   theta_max: 30.0,
 };
 
-const DEFAULT_WATER_TABLE: WaterTable = { elevation: 0.0 };
+const DEFAULT_WATER_TABLE: WaterTable = { elevation: null };
 
 const DEFAULT_CIRCLE: Circle = { cx: 0.0, cy: 20.0, radius: 15.0 };
 

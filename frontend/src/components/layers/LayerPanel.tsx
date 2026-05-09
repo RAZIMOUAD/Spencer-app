@@ -15,8 +15,22 @@ function emptyLayer(existingLayers: { id: number }[]): SoilLayer {
     gamma: 20.0,
     cohesion: 10.0,
     phi_deg: 30.0,
-    thickness: null,
+    thickness: 2.0,
   };
+}
+
+function remainingThickness(layers: SoilLayer[], slopeHeight: number) {
+  const used = layers.reduce((sum, layer) => sum + (layer.thickness ?? 0), 0);
+  return Math.max(0, slopeHeight - used);
+}
+
+function displayedThickness(layers: SoilLayer[], index: number, slopeHeight: number) {
+  const previous = layers
+    .slice(0, index)
+    .reduce((sum, layer) => sum + (layer.thickness ?? 0), 0);
+  const current = layers[index];
+  if (current.thickness !== null) return current.thickness;
+  return Math.max(0, slopeHeight - previous);
 }
 
 function NumberInput({
@@ -26,6 +40,7 @@ function NumberInput({
   min,
   max,
   step,
+  disabled = false,
   onChange,
 }: {
   label: string;
@@ -34,6 +49,7 @@ function NumberInput({
   min?: number;
   max?: number;
   step: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   return (
@@ -46,8 +62,9 @@ function NumberInput({
           max={max}
           step={step}
           value={value ?? ''}
+          disabled={disabled}
           onChange={(e) => { const v = parseFloat(e.target.value); if (isFinite(v)) onChange(v); }}
-          className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+          className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100 disabled:text-slate-500"
         />
         <span className="w-14 text-xs font-bold text-slate-400">{unit}</span>
       </div>
@@ -57,20 +74,40 @@ function NumberInput({
 
 export default function LayerPanel() {
   const layers = useAnalysisStore((s) => s.layers);
+  const slopeHeight = useAnalysisStore((s) => s.slopeHeight);
   const setLayers = useAnalysisStore((s) => s.setLayers);
   const [draft, setDraft] = useState<DraftLayer | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const openCreate = () => setDraft({ ...emptyLayer(layers), mode: 'create' });
+  const openCreate = () => {
+    const lastLayer = layers[layers.length - 1];
+    const fallback = emptyLayer(layers);
+    setDraft({
+      ...(lastLayer ?? fallback),
+      thickness: lastLayer?.thickness ?? Math.min(2.0, Math.max(0.1, remainingThickness(layers, slopeHeight) / 2)),
+      mode: 'create',
+    });
+  };
   const openEdit = (layer: SoilLayer) => setDraft({ ...layer, mode: 'edit' });
 
   const saveDraft = () => {
     if (!draft) return;
     if (draft.mode === 'create') {
-      const updated = layers.map((l) => (l.thickness === null ? { ...l, thickness: 2.0 } : l));
-      setLayers([...updated, { ...draft, mode: undefined } as SoilLayer]);
+      const manualThickness = Math.max(0.1, draft.thickness ?? 2.0);
+      const newSubstratum = emptyLayer(layers);
+      const updated = layers.map((layer, index) => (
+        index === layers.length - 1
+          ? ({ ...draft, thickness: manualThickness, mode: undefined } as SoilLayer)
+          : layer
+      ));
+      setLayers([...updated, { ...newSubstratum, thickness: null }]);
     } else {
-      setLayers(layers.map((l) => (l.id === draft.id ? ({ ...draft, mode: undefined } as SoilLayer) : l)));
+      const lastId = layers[layers.length - 1]?.id;
+      setLayers(layers.map((l) => (
+        l.id === draft.id
+          ? ({ ...draft, thickness: draft.id === lastId ? null : draft.thickness, mode: undefined } as SoilLayer)
+          : l
+      )));
     }
     setDraft(null);
   };
@@ -89,7 +126,7 @@ export default function LayerPanel() {
     <div className="space-y-3">
       <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
         {layers.map((layer, idx) => {
-          const isSubstratum = idx === layers.length - 1;
+          const thickness = displayedThickness(layers, idx, slopeHeight);
           return (
             <div key={layer.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -127,7 +164,7 @@ export default function LayerPanel() {
                 <div className="grid gap-1 font-semibold text-slate-500">
                   <span>e</span>
                   <span className="text-sm font-bold text-slate-950">
-                    {isSubstratum ? <small className="font-bold text-slate-400">Substratum</small> : `${layer.thickness?.toFixed(2)} m`}
+                    {thickness.toFixed(2)} m
                   </span>
                 </div>
               </div>
@@ -148,10 +185,10 @@ export default function LayerPanel() {
           <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
             <div className="border-b border-slate-200 p-5">
               <p className="text-xs font-black uppercase tracking-wide text-slate-500">
-                {draft.mode === 'create' ? 'Nouvelle couche' : 'Modification des paramètres'}
+                {draft.mode === 'create' ? 'Découper la dernière couche' : 'Modification des paramètres'}
               </p>
               <h3 className="mt-1 text-2xl font-black text-slate-950">
-                {draft.mode === 'create' ? 'Ajouter une couche de sol' : `Modifier ${draft.name}`}
+                {draft.mode === 'create' ? 'Définir l’épaisseur de la couche actuelle' : `Modifier ${draft.name}`}
               </h3>
             </div>
 
@@ -166,10 +203,29 @@ export default function LayerPanel() {
               </label>
 
               <div className="grid grid-cols-2 gap-4">
+                {(() => {
+                  const draftIndex = draft.mode === 'edit' ? layers.findIndex((layer) => layer.id === draft.id) : Math.max(0, layers.length - 1);
+                  const isLastLayer = draft.mode === 'edit' && draftIndex === layers.length - 1;
+                  const thicknessValue = isLastLayer
+                    ? displayedThickness(layers, draftIndex, slopeHeight)
+                    : draft.thickness ?? 2.0;
+                  return (
+                    <>
                 <NumberInput label="Poids volumique γ" unit="kN/m³" value={draft.gamma} step={0.5} min={1} onChange={(v) => setDraft({ ...draft, gamma: v })} />
                 <NumberInput label="Cohésion effective c'" unit="kPa" value={draft.cohesion} step={1} min={0} onChange={(v) => setDraft({ ...draft, cohesion: v })} />
                 <NumberInput label="Angle de frottement φ'" unit="°" value={draft.phi_deg} step={0.5} min={1} max={89} onChange={(v) => setDraft({ ...draft, phi_deg: v })} />
-                <NumberInput label="Épaisseur e" unit="m" value={draft.thickness ?? 2.0} step={0.5} min={0.1} onChange={(v) => setDraft({ ...draft, thickness: v })} />
+                <NumberInput
+                  label={isLastLayer ? 'Épaisseur e calculée' : 'Épaisseur e'}
+                  unit="m"
+                  value={thicknessValue}
+                  step={0.5}
+                  min={0.1}
+                  disabled={isLastLayer}
+                  onChange={(v) => setDraft({ ...draft, thickness: v })}
+                />
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="rounded-lg bg-slate-50 p-4 text-sm font-medium leading-6 text-slate-600">

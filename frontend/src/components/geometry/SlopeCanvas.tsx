@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { PointerEvent, WheelEvent } from 'react';
 import { useAnalysisStore } from '@/store/analysisStore';
 import type { Circle, Slice, SoilLayer } from '@/lib/types';
 
@@ -47,12 +48,13 @@ function slipArcPoints(
   H: number,
   L: number,
   upstream: number,
-  xMin: number,
-  xMax: number,
-  yMin: number,
-  yMax: number,
 ) {
   const points: Array<[number, number]> = [];
+  const toe = upstream + L;
+  const xMin = Math.max(0, upstream - Math.max(L, H));
+  const xMax = toe + Math.max(L, H);
+  const yMin = -Math.max(H * 0.75, 5);
+  const yMax = H + Math.max(H * 0.35, 3);
   for (let i = 0; i <= 720; i += 1) {
     const theta = (i / 720) * Math.PI * 2;
     const x = circle.cx + circle.radius * Math.cos(theta);
@@ -83,6 +85,17 @@ function longestContinuousArc(points: Array<[number, number]>) {
 
 export default function SlopeCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const viewRef = useRef({
+    xSpan: 1,
+    ySpan: 1,
+    plotW: 1,
+    plotH: 1,
+  });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 760 });
   const { layers, waterTable, slopeHeight, slopeLength, result, criticalResult } =
     useAnalysisStore((s) => ({
       layers: s.layers,
@@ -96,11 +109,36 @@ export default function SlopeCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.max(1, Math.round(entry.contentRect.width));
+      const height = Math.max(1, Math.round(entry.contentRect.height));
+      setCanvasSize((current) => (
+        current.width === width && current.height === height ? current : { width, height }
+      ));
+    });
+
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const W = canvas.width;
-    const Hpx = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvasSize.width;
+    const Hpx = canvasSize.height;
+    const deviceW = Math.round(W * dpr);
+    const deviceH = Math.round(Hpx * dpr);
+    if (canvas.width !== deviceW || canvas.height !== deviceH) {
+      canvas.width = deviceW;
+      canvas.height = deviceH;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     const H = isFinite(slopeHeight) && slopeHeight > 0 ? slopeHeight : 10;
     const L = isFinite(slopeLength) && slopeLength > 0 ? slopeLength : 15;
     const { upstream, downstream } = plateaus(H, L);
@@ -116,19 +154,52 @@ export default function SlopeCanvas() {
     ] as Array<[number, number]>;
 
     const depth = Math.max(H * 0.35, 3);
-    const xMin = 0;
-    const xMax = xTotal;
-    let yMin = -depth;
-    let yMax = H + Math.max(H * 0.22, 2);
+    let baseXMin = 0;
+    let baseXMax = xTotal;
+    let baseYMin = -depth;
+    let baseYMax = H + Math.max(H * 0.22, 2);
 
     if (circle) {
-      yMin = Math.min(yMin, circle.cy - circle.radius * 0.12);
-      yMax = Math.max(yMax, circle.cy + circle.radius * 0.12);
+      const arc = slipArcPoints(circle, H, L, upstream);
+      const focusX = [upstream - Math.max(L * 0.55, H * 0.75), upstream + L + Math.max(L * 0.8, H)];
+      const focusY = [-Math.max(H * 0.55, 5), H + Math.max(H * 0.35, 3)];
+      if (arc.length > 1) {
+        const xsArc = arc.map(([x]) => x);
+        const ysArc = arc.map(([, y]) => y);
+        focusX.push(Math.min(...xsArc), Math.max(...xsArc));
+        focusY.push(Math.min(...ysArc), Math.max(...ysArc));
+      }
+      const marginX = Math.max(L * 0.18, H * 0.2, 2);
+      const marginY = Math.max(H * 0.16, 1.5);
+      baseXMin = Math.max(0, Math.min(...focusX) - marginX);
+      baseXMax = Math.min(xTotal, Math.max(...focusX) + marginX);
+      baseYMin = Math.min(...focusY) - marginY;
+      baseYMax = Math.max(...focusY) + marginY;
     }
 
     const pad = { left: 54, right: 34, top: 34, bottom: 50 };
-    const sx = (x: number) => pad.left + ((x - xMin) / (xMax - xMin)) * (W - pad.left - pad.right);
-    const sy = (y: number) => pad.top + ((yMax - y) / (yMax - yMin)) * (Hpx - pad.top - pad.bottom);
+    const plotW = W - pad.left - pad.right;
+    const plotH = Hpx - pad.top - pad.bottom;
+    const xCenter = (baseXMin + baseXMax) / 2 + pan.x;
+    const yCenter = (baseYMin + baseYMax) / 2 + pan.y;
+    const rawXSpan = (baseXMax - baseXMin) / zoom;
+    const rawYSpan = (baseYMax - baseYMin) / zoom;
+    const metresPerPixel = Math.max(rawXSpan / plotW, rawYSpan / plotH);
+    const xSpan = metresPerPixel * plotW;
+    const ySpan = metresPerPixel * plotH;
+    const xMin = xCenter - xSpan / 2;
+    const xMax = xCenter + xSpan / 2;
+    const yMin = yCenter - ySpan / 2;
+    const yMax = yCenter + ySpan / 2;
+
+    viewRef.current = {
+      xSpan,
+      ySpan,
+      plotW,
+      plotH,
+    };
+    const sx = (x: number) => pad.left + ((x - xMin) / (xMax - xMin)) * plotW;
+    const sy = (y: number) => pad.top + ((yMax - y) / (yMax - yMin)) * plotH;
 
     ctx.clearRect(0, 0, W, Hpx);
     ctx.fillStyle = '#f8fafc';
@@ -186,7 +257,7 @@ export default function SlopeCanvas() {
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    if (waterTable.elevation > yMin && waterTable.elevation < yMax) {
+    if (waterTable.elevation !== null && waterTable.elevation > yMin && waterTable.elevation < yMax) {
       ctx.strokeStyle = '#1478a8';
       ctx.setLineDash([7, 5]);
       ctx.lineWidth = 2;
@@ -215,15 +286,29 @@ export default function SlopeCanvas() {
     }
 
     if (circle) {
-      const arc = slipArcPoints(circle, H, L, upstream, xMin, xMax, yMin, yMax);
+      const arc = slipArcPoints(circle, H, L, upstream);
       if (result?.fs && isFinite(result.fs)) {
         console.info('[SPENCER-SLOPE] FoS', result.fs.toFixed(4));
-        console.info('[SPENCER-SLOPE] Slip arc points', arc.length);
+        console.info('[SPENCER-SLOPE] Critical circle', {
+          xc: Number(circle.cx.toFixed(3)),
+          yc: Number(circle.cy.toFixed(3)),
+          R: Number(circle.radius.toFixed(3)),
+        });
+      console.info('[SPENCER-SLOPE] Slip arc points', arc.length);
       }
       ctx.save();
       ctx.beginPath();
       ctx.rect(pad.left, pad.top, W - pad.left - pad.right, Hpx - pad.top - pad.bottom);
       ctx.clip();
+      const radiusPx = circle.radius / metresPerPixel;
+      ctx.strokeStyle = 'rgba(176, 137, 0, 0.22)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(sx(circle.cx), sy(circle.cy), radiusPx, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
       ctx.strokeStyle = '#b08900';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -254,7 +339,7 @@ export default function SlopeCanvas() {
         ctx.arc(sx(circle.cx), sy(circle.cy), 4, 0, Math.PI * 2);
         ctx.fill();
       }
-      drawLabel(ctx, 'Cercle critique calculé', sx(Math.max(upstream * 0.7, 2)), sy(H + Math.max(1, H * 0.1)));
+      drawLabel(ctx, 'Surface de rupture critique', sx(upstream + L * 0.18), sy(H + Math.max(0.8, H * 0.08)));
     }
 
     if (result?.fs && isFinite(result.fs)) {
@@ -263,7 +348,47 @@ export default function SlopeCanvas() {
 
     drawLabel(ctx, `H = ${H.toFixed(2)} m`, sx(upstream * 0.16), sy(H / 2));
     drawLabel(ctx, `L = ${L.toFixed(2)} m`, sx(upstream + L * 0.45), sy(-depth * 0.58));
-  }, [layers, waterTable, slopeHeight, slopeLength, result, criticalResult]);
+  }, [layers, waterTable, slopeHeight, slopeLength, result, criticalResult, zoom, pan, canvasSize]);
+
+  const handleWheel = (event: WheelEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    setZoom((current) => {
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      return Math.max(0.6, Math.min(5, current * factor));
+    });
+  };
+
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
+    dragRef.current = { x: event.clientX, y: event.clientY };
+    setIsDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!dragRef.current) return;
+    const dx = event.clientX - dragRef.current.x;
+    const dy = event.clientY - dragRef.current.y;
+    dragRef.current = { x: event.clientX, y: event.clientY };
+
+    const { xSpan, ySpan, plotW, plotH } = viewRef.current;
+    setPan((current) => ({
+      x: current.x - (dx / plotW) * xSpan,
+      y: current.y + (dy / plotH) * ySpan,
+    }));
+  };
+
+  const stopDrag = (event: PointerEvent<HTMLCanvasElement>) => {
+    dragRef.current = null;
+    setIsDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
@@ -273,12 +398,25 @@ export default function SlopeCanvas() {
           <span className="inline-flex items-center gap-2"><i className="h-0.5 w-5 bg-[#1478a8]" /> Nappe</span>
           <span className="inline-flex items-center gap-2"><i className="h-0.5 w-5 bg-[#b08900]" /> Surface de rupture</span>
         </div>
+        <button
+          type="button"
+          onClick={resetView}
+          className="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50"
+        >
+          Recentrer
+        </button>
       </div>
       <canvas
         ref={canvasRef}
         width={1200}
         height={760}
-        className="min-h-0 flex-1 w-full"
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+        onDoubleClick={resetView}
+        className={`min-h-0 w-full flex-1 touch-none select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         aria-label="Profil du talus avec surface de rupture critique"
       />
     </section>

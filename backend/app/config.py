@@ -20,11 +20,12 @@ TOP_K_COARSE = 10
 TOP_K_FINE = 5
 N_RADII = 8
 MIN_CONVERGENCE_RATIO = 0.05
+MAX_REASONABLE_FS = 10.0
 
 
-def auto_slice_count(radius: float) -> int:
-    """Choose a stable slice count from the slip-circle radius."""
-    return max(20, min(40, int(radius / 2)))
+def auto_slice_count(slip_width: float) -> int:
+    """Choose a stable slice count from the real slip-mass width."""
+    return max(20, min(40, int(slip_width / 1.0)))
 
 
 def classify_factor_of_safety(fs: float) -> str:

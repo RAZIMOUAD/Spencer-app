@@ -29,7 +29,7 @@ from app.errors import (
 )
 from core.cache import CircleCache
 from core.layer_index import LayerIndex
-from core.slicing import divide_into_slices
+from core.slicing import auto_slice_count_for_circle, divide_into_slices
 from core.spencer import solve_spencer
 
 _EARLY_STOP_MARGIN = 0.15  # reject if estimated FS > best_fs * (1 + margin)
@@ -80,7 +80,7 @@ def find_critical_circle(
     if len(terrain_pts) < 2:
         raise SearchDomainError("Le profil du terrain doit contenir au moins 2 points.")
 
-    H = max(pt.y for pt in terrain_pts)
+    H = max(pt.y for pt in terrain_pts) - min(pt.y for pt in terrain_pts)
     if H < 1e-3:
         raise SearchDomainError(f"Hauteur de talus trop faible : H = {H:.4f} m.")
 
@@ -172,7 +172,7 @@ def iter_critical_circle(
     StopIteration.value holds (circle, fs, stats).
     """
     t0 = time.monotonic()
-    H = max(pt.y for pt in terrain_pts)
+    H = max(pt.y for pt in terrain_pts) - min(pt.y for pt in terrain_pts)
     idx = LayerIndex.build(layers, H)
     cache = CircleCache(maxsize=20_000)
     stats = SearchStats(tested=0, converged=0, rejected=0)
@@ -278,27 +278,20 @@ class _SearchCtx:
 def _search_domain(
     terrain_pts: list[TerrainPoint], H: float
 ) -> tuple[float, float, float, float, float, float]:
-    x_crest = terrain_pts[0].x
-    for pt in terrain_pts:
-        if pt.y >= H - 0.01:
-            x_crest = pt.x
     x_min = terrain_pts[0].x
     x_max = terrain_pts[-1].x
-
-    # Keep the original crest-oriented upper bound, but extend the upstream
-    # side to the full model domain.  Many valid circular surfaces enter the
-    # model from outside the upstream boundary; a centre left of the crest can
-    # therefore be critical even when it is farther than 0.5H from the crest.
-    cx_min = x_min - 0.5 * H
-    cx_max = min(x_max + 0.25 * H, x_crest + 1.5 * H)
+    y_max = max(pt.y for pt in terrain_pts)
+    y_min = min(pt.y for pt in terrain_pts)
+    crest_x, toe_x = _crest_and_toe_x(terrain_pts, y_max, y_min)
+    slope_width = max(toe_x - crest_x, H)
 
     return (
-        cx_min,               # cx_min
-        cx_max,               # cx_max
-        H,                    # cy_min
-        H + 2.0 * H,         # cy_max
-        H / 2.0,              # r_min
-        3.0 * H,              # r_max
+        max(x_min, crest_x - 0.60 * slope_width),  # centre near slope body
+        min(x_max, toe_x + 0.60 * slope_width),
+        y_max,                                      # centre above crest
+        y_max + 2.0 * H,
+        max(0.60 * H, 0.20 * slope_width, 1e-6),   # avoid tiny local arcs
+        min(3.0 * H, 1.25 * slope_width),          # avoid excessive radii
     )
 
 
@@ -392,7 +385,12 @@ def _try_evaluate_one(
 
     ctx.stats.tested += 1
     try:
-        n_slices = config.auto_slice_count(circle.radius)
+        if not _circle_has_realistic_terrain_intersections(circle, ctx.terrain_pts):
+            ctx.stats.rejected += 1
+            ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
+            return None
+
+        n_slices = auto_slice_count_for_circle(circle, ctx.terrain_pts)
         circle_settings = ctx.settings.model_copy(update={"n_slices": n_slices})
         slices = divide_into_slices(
             circle=circle,
@@ -404,7 +402,13 @@ def _try_evaluate_one(
         )
 
         good = sum(1 for s in slices if s.height > 0)
-        if not slices or good / n_slices < ctx.search.min_convergence_ratio:
+        min_valid_slices = max(10, int(0.65 * n_slices))
+        if not slices or good < min_valid_slices:
+            ctx.stats.rejected += 1
+            ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
+            return None
+
+        if not _slices_cover_slope_body(slices, ctx.terrain_pts):
             ctx.stats.rejected += 1
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
@@ -416,7 +420,7 @@ def _try_evaluate_one(
             return None
 
         fs, _theta, converged, _it = solve_spencer(slices, circle_settings)
-        if not converged or not math.isfinite(fs) or fs <= 0:
+        if not converged or not math.isfinite(fs) or fs <= 0 or fs > config.MAX_REASONABLE_FS:
             ctx.stats.rejected += 1
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
@@ -438,6 +442,133 @@ def _try_evaluate_one(
     except Exception:
         ctx.stats.rejected += 1
         return None
+
+
+def _circle_has_realistic_terrain_intersections(
+    circle: Circle,
+    terrain_pts: list[TerrainPoint],
+) -> bool:
+    """
+    Accept only circles that enter near the upper slope and exit lower/downhill.
+
+    This rejects shallow plateau arcs and circles that intersect the terrain
+    twice but do not mobilise a plausible sliding mass.
+    """
+    intersections = _circle_terrain_intersections(circle, terrain_pts)
+    if len(intersections) < 2:
+        return False
+
+    y_min = min(pt.y for pt in terrain_pts)
+    y_max = max(pt.y for pt in terrain_pts)
+    height = y_max - y_min
+    if height <= 1e-9:
+        return False
+
+    crest_x, toe_x = _crest_and_toe_x(terrain_pts, y_max, y_min)
+    slope_width = toe_x - crest_x
+    if slope_width <= 1e-9:
+        return False
+
+    entry = intersections[0]
+    exit_ = intersections[-1]
+    entry_x, entry_y = entry
+    exit_x, exit_y = exit_
+
+    entry_high = entry_y >= y_min + 0.55 * height
+    entry_near_crest = entry_x <= crest_x + 0.35 * slope_width
+    exit_downhill = exit_y <= y_min + 0.70 * height
+    exit_near_toe = exit_x >= crest_x + 0.55 * slope_width
+
+    return entry_high and entry_near_crest and exit_downhill and exit_near_toe
+
+
+def _slices_cover_slope_body(
+    slices: list,
+    terrain_pts: list[TerrainPoint],
+) -> bool:
+    """Reject local plateau arcs; require slice interval to span most of crest-toe."""
+    y_min = min(pt.y for pt in terrain_pts)
+    y_max = max(pt.y for pt in terrain_pts)
+    height = y_max - y_min
+    if height <= 1e-9:
+        return False
+
+    crest_x, toe_x = _crest_and_toe_x(terrain_pts, y_max, y_min)
+    left_x = min(s.x_left for s in slices)
+    right_x = max(s.x_right for s in slices)
+    min_base_y = min(s.y_base for s in slices)
+    area = sum(s.area for s in slices)
+    span = right_x - left_x
+    slope_width = toe_x - crest_x
+    if slope_width <= 1e-9:
+        return False
+
+    min_span = max(0.70 * slope_width, 0.60 * height)
+    min_depth = y_min + 0.20 * height
+    min_area = 0.15 * slope_width * height
+
+    return (
+        span >= min_span
+        and left_x < toe_x
+        and right_x > crest_x
+        and min_base_y <= min_depth
+        and area >= min_area
+    )
+
+
+def _crest_and_toe_x(
+    terrain_pts: list[TerrainPoint],
+    y_max: float,
+    y_min: float,
+) -> tuple[float, float]:
+    crest_x = terrain_pts[0].x
+    toe_x = terrain_pts[-1].x
+
+    for i in range(len(terrain_pts) - 1):
+        a, b = terrain_pts[i], terrain_pts[i + 1]
+        if abs(a.y - y_max) < 1e-6 and b.y < a.y:
+            crest_x = a.x
+        if a.y > b.y and abs(b.y - y_min) < 1e-6:
+            toe_x = b.x
+
+    return crest_x, toe_x
+
+
+def _circle_terrain_intersections(
+    circle: Circle,
+    terrain_pts: list[TerrainPoint],
+) -> list[tuple[float, float]]:
+    """Return deduplicated circle/terrain intersections as (x, y)."""
+    points: list[tuple[float, float]] = []
+    cx, cy, radius = circle.cx, circle.cy, circle.radius
+
+    for i in range(len(terrain_pts) - 1):
+        x0, y0 = terrain_pts[i].x, terrain_pts[i].y
+        x1, y1 = terrain_pts[i + 1].x, terrain_pts[i + 1].y
+        dx, dy = x1 - x0, y1 - y0
+        fx, fy = x0 - cx, y0 - cy
+
+        a = dx * dx + dy * dy
+        if a < 1e-12:
+            continue
+        b = 2.0 * (fx * dx + fy * dy)
+        c = fx * fx + fy * fy - radius * radius
+        disc = b * b - 4.0 * a * c
+        if disc < 0:
+            continue
+
+        sqrt_disc = math.sqrt(disc)
+        for sign in (1.0, -1.0):
+            t = (-b + sign * sqrt_disc) / (2.0 * a)
+            if 0.0 <= t <= 1.0:
+                points.append((x0 + t * dx, y0 + t * dy))
+
+    points.sort(key=lambda item: item[0])
+    deduped: list[tuple[float, float]] = []
+    for x, y in points:
+        if not deduped or math.hypot(x - deduped[-1][0], y - deduped[-1][1]) > 1e-4:
+            deduped.append((x, y))
+    return deduped
 
 
 def _driving_ratio(slices) -> float:

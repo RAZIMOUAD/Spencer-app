@@ -25,7 +25,7 @@ from app.errors import AnalysisCancelledError, SpencerBaseError
 from core.cost import estimate_cost
 from core.geometry import auto_plateaus, slope_profile
 from core.search import find_critical_circle
-from core.slicing import divide_into_slices
+from core.slicing import auto_slice_count_for_circle, divide_into_slices
 from core.spencer import solve_spencer
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def create_job(req: CriticalCircleRequest) -> JobCreateResponse:
     n_layers = len(req.layers)
 
     # Raises TooManyCandidatesError / PrecisionTooExpensiveError if over limits
-    settings = _internal_settings(max(req.slope_height, req.slope_length))
+    settings = _internal_settings()
     search = _internal_search()
     cost = estimate_cost(H, n_layers, settings, search)
 
@@ -147,10 +147,11 @@ def _run_job_sync(
 ) -> None:
     """Executed in a background thread. Updates job store directly."""
     try:
+        t0 = time.perf_counter()
         l_amont, l_aval = auto_plateaus(req.slope_height, req.slope_length)
         terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)
 
-        settings = _internal_settings(max(req.slope_height, req.slope_length))
+        settings = _internal_settings()
         search = _internal_search()
         best_circle, min_fs, stats = find_critical_circle(
             terrain_pts=terrain_pts,
@@ -162,7 +163,7 @@ def _run_job_sync(
         )
 
         # Full Spencer result for the critical circle
-        final_settings = _internal_settings(best_circle.radius)
+        final_settings = _internal_settings(auto_slice_count_for_circle(best_circle, terrain_pts))
         slices = divide_into_slices(
             circle=best_circle,
             n_slices=final_settings.n_slices,
@@ -181,6 +182,7 @@ def _run_job_sync(
             slices=enriched,
             converged=converged,
             iterations=iterations,
+            elapsed_seconds=round(time.perf_counter() - t0, 3),
             circle=best_circle,
         )
         result = CriticalCircleResult(
@@ -230,9 +232,9 @@ def _enrich_slices(slices: list[Slice], fs: float) -> list[Slice]:
     return enriched
 
 
-def _internal_settings(radius: float) -> SpencerSettings:
+def _internal_settings(n_slices: int = 20) -> SpencerSettings:
     return SpencerSettings(
-        n_slices=config.auto_slice_count(radius),
+        n_slices=n_slices,
         tolerance=config.TOL_SPENCER,
         max_iter=config.MAX_ITER,
         theta_min=config.THETA_MIN,

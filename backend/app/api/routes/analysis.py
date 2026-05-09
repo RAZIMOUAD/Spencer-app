@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import logging
+import time
 
 from fastapi import APIRouter
 from pydantic import ValidationError as PydanticValidationError
@@ -25,7 +26,7 @@ from app.schemas import (
 from app.errors import ValidationError, GeometryError
 from core.geometry import slope_profile, auto_plateaus
 from core.validation import validate_layers, validate_geometry, validate_circle
-from core.slicing import divide_into_slices
+from core.slicing import auto_slice_count_for_circle, divide_into_slices
 from core.spencer import solve_spencer
 from core.search import find_critical_circle
 
@@ -38,10 +39,10 @@ logger = logging.getLogger("spencer.analysis")
 # ---------------------------------------------------------------------------
 
 
-def _internal_settings(radius: float) -> SpencerSettings:
+def _internal_settings(n_slices: int = 20) -> SpencerSettings:
     """Return production solver settings hidden from normal users."""
     return SpencerSettings(
-        n_slices=config.auto_slice_count(radius),
+        n_slices=n_slices,
         tolerance=config.TOL_SPENCER,
         max_iter=config.MAX_ITER,
         theta_min=config.THETA_MIN,
@@ -69,6 +70,7 @@ def _build_result(
     converged: bool,
     iterations: int,
     circle: Circle,
+    elapsed_seconds: float = 0.0,
 ) -> AnalysisResult:
     """Populate resisting field on each slice, then return an AnalysisResult."""
     enriched: list[Slice] = []
@@ -89,6 +91,7 @@ def _build_result(
         slices=enriched,
         converged=converged,
         iterations=iterations,
+        elapsed_seconds=round(elapsed_seconds, 3),
         circle=circle,
     )
 
@@ -110,6 +113,7 @@ async def evaluate_circle(req: AnalysisRequest) -> AnalysisResult:
     Returns the Factor of Safety, the interslice force angle θ, and
     the computed slices with geometric and force details.
     """
+    t0 = time.perf_counter()
     geom_errors = validate_geometry(req.slope_height, req.slope_length)
     if geom_errors:
         raise ValidationError("Géométrie invalide", {"errors": geom_errors})
@@ -125,7 +129,7 @@ async def evaluate_circle(req: AnalysisRequest) -> AnalysisResult:
     if circle_errors:
         raise GeometryError("Cercle de glissement invalide", {"errors": circle_errors})
 
-    settings = _internal_settings(req.circle.radius)
+    settings = _internal_settings(auto_slice_count_for_circle(req.circle, terrain_pts))
     slices = divide_into_slices(
         circle=req.circle,
         n_slices=settings.n_slices,
@@ -146,7 +150,8 @@ async def evaluate_circle(req: AnalysisRequest) -> AnalysisResult:
         req.circle.radius,
     )
 
-    return _build_result(slices, fs, theta, converged, iterations, req.circle)
+    elapsed = time.perf_counter() - t0
+    return _build_result(slices, fs, theta, converged, iterations, req.circle, elapsed)
 
 
 @router.post(
@@ -163,6 +168,7 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
 
     For heavy searches, prefer the async job endpoints (/jobs).
     """
+    t0 = time.perf_counter()
     geom_errors = validate_geometry(req.slope_height, req.slope_length)
     if geom_errors:
         raise ValidationError("Géométrie invalide", {"errors": geom_errors})
@@ -175,7 +181,7 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
     terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)
 
     search = _internal_search()
-    search_settings = _internal_settings(max(req.slope_height, req.slope_length))
+    search_settings = _internal_settings()
     best_circle, min_fs, stats = find_critical_circle(
         terrain_pts=terrain_pts,
         layers=req.layers,
@@ -184,7 +190,7 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
         search=search,
     )
 
-    final_settings = _internal_settings(best_circle.radius)
+    final_settings = _internal_settings(auto_slice_count_for_circle(best_circle, terrain_pts))
     slices = divide_into_slices(
         circle=best_circle,
         n_slices=final_settings.n_slices,
@@ -205,7 +211,8 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
         best_circle.radius,
         stats.tested,
     )
-    result = _build_result(slices, fs, theta, converged, iterations, best_circle)
+    elapsed = time.perf_counter() - t0
+    result = _build_result(slices, fs, theta, converged, iterations, best_circle, elapsed)
 
     return CriticalCircleResult(
         critical_circle=best_circle,

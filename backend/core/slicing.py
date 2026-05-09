@@ -31,12 +31,14 @@ def divide_into_slices(
 
     Layer and pore-pressure lookup
     --------------------------------
-    Both use the **mid-height elevation** of the slice:
+    Layer lookup uses the **mid-height elevation** of the slice:
 
         y_mid = (y_top + y_base) / 2
 
-    This is more representative than y_base alone when a slice straddles a
-    layer boundary or crosses the water table near mid-height.
+    Pore pressure is evaluated at the base midpoint because water pressure
+    acts on the slip surface:
+
+        u = gamma_w * max(0, water_level - y_base)
 
     Parameters
     ----------
@@ -123,8 +125,8 @@ def divide_into_slices(
         # Total weight W = γ · area (pore pressure handled separately)
         W = layer.gamma * area
 
-        # Pore pressure u at slice mid-height (hydrostatic)
-        hw = max(0.0, water_table.elevation - y_mid)
+        # Pore pressure u at the slice base midpoint (hydrostatic).
+        hw = max(0.0, water_table.elevation - y_base) if water_table.elevation is not None else 0.0
         u = GAMMA_W * hw
         pore_force = u * base_len
 
@@ -168,12 +170,29 @@ def divide_into_slices(
             {"n_requested": n_slices},
         )
 
+    slices = _orient_slices_for_driving(slices)
+
     return slices
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def auto_slice_count_for_circle(
+    circle: Circle,
+    terrain_pts: list[TerrainPoint],
+    target_width: float = 1.0,
+) -> int:
+    """Choose slices from the real horizontal width of the slip mass.
+
+    The range is recomputed for every candidate circle, then divided into
+    vertical slices of about 1 m, bounded to keep Spencer stable and fast.
+    """
+    x_start, x_end = _find_valid_x_range(circle, terrain_pts)
+    slip_width = max(0.0, x_end - x_start)
+    return max(20, min(40, int(slip_width / target_width)))
 
 
 def _find_valid_x_range(circle: Circle, terrain_pts: list[TerrainPoint]) -> tuple[float, float]:
@@ -240,6 +259,32 @@ def _circle_base_y(circle: Circle, x: float) -> float | None:
     if disc < 0:
         return None
     return circle.cy - math.sqrt(disc)
+
+
+def _orient_slices_for_driving(slices: list[Slice]) -> list[Slice]:
+    """
+    Keep the slip direction convention consistent for the solver.
+
+    Depending on the circle centre, the same physical slip mass can be described
+    with α mostly negative. Spencer/Bishop needs a positive driving sum, so we
+    flip all slice base inclinations together when the global driving direction
+    is reversed. cos(α) is unchanged; only sin(α)-dependent terms change sign.
+    """
+    driving_sum = sum(s.weight * math.sin(math.radians(s.alpha_deg)) for s in slices)
+    if driving_sum >= 0:
+        return slices
+
+    oriented: list[Slice] = []
+    for slc in slices:
+        oriented.append(
+            slc.model_copy(
+                update={
+                    "alpha_deg": -slc.alpha_deg,
+                    "driving": -slc.driving,
+                }
+            )
+        )
+    return oriented
 
 
 def _terrain_y_at(x: float, terrain_pts: list[TerrainPoint]) -> float:

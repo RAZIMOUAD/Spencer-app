@@ -23,7 +23,7 @@ export interface SoilLayer {
 
 export interface WaterTable {
   /** Piezometric elevation in metres */
-  elevation: number;
+  elevation: number | null;
 }
 
 export interface Circle {
@@ -109,6 +109,7 @@ export interface AnalysisResult {
   slices: Slice[];
   converged: boolean;
   iterations: number;
+  elapsed_seconds: number;
   circle: Circle;
 }
 

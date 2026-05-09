@@ -2,9 +2,10 @@
 
 import { useAnalysisStore } from '@/store/analysisStore';
 
-function fsTone(fs: number) {
-  if (fs >= 1.5) return { label: 'Stable', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' };
-  if (fs >= 1.25) return { label: 'À surveiller', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' };
+function fsTone(fs: number, status?: string) {
+  const resolvedStatus = status ?? (Math.abs(fs - 1) <= 0.01 ? 'limit' : fs > 1 ? 'stable' : 'unstable');
+  if (resolvedStatus === 'limit') return { label: 'État limite', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' };
+  if (resolvedStatus === 'stable') return { label: 'Stable', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' };
   return { label: 'Instable', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' };
 }
 
@@ -82,7 +83,7 @@ export default function ResultsSummary() {
 
   if (!result || !isFinite(result.fs)) return null;
 
-  const tone = fsTone(result.fs);
+  const tone = fsTone(result.fs, result.stability_status);
 
   return (
     <div className="space-y-3">

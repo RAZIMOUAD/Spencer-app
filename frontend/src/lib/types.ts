@@ -104,6 +104,7 @@ export interface SearchStats {
 
 export interface AnalysisResult {
   fs: number;
+  stability_status: 'unstable' | 'limit' | 'stable';
   theta: number;
   slices: Slice[];
   converged: boolean;

@@ -84,6 +84,7 @@ def _build_result(
 
     return AnalysisResult(
         fs=fs,
+        stability_status=config.classify_factor_of_safety(fs),
         theta=theta,
         slices=enriched,
         converged=converged,

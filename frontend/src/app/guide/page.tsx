@@ -21,7 +21,7 @@ const faqs = [
     title: 'Comment lire le facteur de sécurité ?',
     tag: 'Résultat',
     body: 'Le facteur FS compare les résistances disponibles aux efforts moteurs. Plus FS est élevé, plus le talus est stable dans le modèle étudié.',
-    points: ['FS < 1.25 : instable ou critique', '1.25 ≤ FS < 1.5 : zone de vigilance', 'FS ≥ 1.5 : stabilité satisfaisante pour une lecture pédagogique', 'Toujours discuter les hypothèses de sol et de nappe'],
+    points: ['FS < 1 : talus instable', 'FS = 1 : état limite d’équilibre', 'FS > 1 : talus stable dans le modèle étudié', 'Toujours discuter les hypothèses de sol et de nappe'],
   },
   {
     title: 'Exemple réel à présenter',

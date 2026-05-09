@@ -176,6 +176,7 @@ def _run_job_sync(
         from app.schemas import AnalysisResult
         analysis = AnalysisResult(
             fs=fs,
+            stability_status=config.classify_factor_of_safety(fs),
             theta=theta,
             slices=enriched,
             converged=converged,

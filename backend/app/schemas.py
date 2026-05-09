@@ -122,6 +122,7 @@ class SearchStats(BaseModel):
 
 class AnalysisResult(BaseModel):
     fs: float = Field(..., description="Factor of Safety", ge=0)
+    stability_status: str = Field(..., description="unstable | limit | stable")
     theta: float = Field(..., description="Interslice force inclination angle (degrees)")
     slices: list[Slice]
     converged: bool

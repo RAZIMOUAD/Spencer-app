@@ -9,7 +9,7 @@ const faqs = [
     title: 'Pourquoi la méthode de Spencer ?',
     tag: 'Méthode',
     body: 'La méthode de Spencer est une méthode d’équilibre limite qui vérifie la stabilité par tranches. Elle cherche un facteur de sécurité cohérent avec l’équilibre des moments et la fermeture des forces inter-tranches.',
-    points: ['Découpage du massif en tranches verticales', 'Calcul des poids, pressions interstitielles et résistances', 'Recherche de l’angle θ des forces inter-tranches', 'Interprétation directe du facteur FS'],
+    points: ['Découpage automatique du massif', 'Calcul des poids, pressions interstitielles et résistances', 'Recherche automatique de la surface critique', 'Interprétation directe du facteur FS'],
   },
   {
     title: 'Que représentent les couches de calcul ?',

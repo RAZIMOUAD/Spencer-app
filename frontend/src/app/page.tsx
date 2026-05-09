@@ -5,7 +5,6 @@ import LayerPanel from '@/components/layers/LayerPanel';
 import SlopeCanvas from '@/components/geometry/SlopeCanvas';
 import ResultsSummary from '@/components/results/ResultsSummary';
 import WaterTableInput from '@/components/hydro/WaterTableInput';
-import SpencerSettings from '@/components/analysis/SpencerSettings';
 
 function NumberField({
   label,
@@ -26,7 +25,7 @@ function NumberField({
         min={0.1}
         step={step}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => { const v = Number(e.target.value); if (isFinite(v) && v > 0) onChange(v); }}
         className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
       />
     </label>
@@ -67,34 +66,16 @@ function GeometryPanel() {
   );
 }
 
-function SearchPanel() {
-  const search = useAnalysisStore((s) => s.search);
-  const setSearch = useAnalysisStore((s) => s.setSearch);
+function RunPanel() {
   const runCriticalAnalysis = useAnalysisStore((s) => s.runCriticalAnalysis);
   const status = useAnalysisStore((s) => s.status);
 
-  const updateSearchField = (
-    key: 'coarse_step' | 'fine_step' | 'final_step',
-    value: number,
-  ) => setSearch({ [key]: value });
-
   return (
     <section id="analysis" className="tool-panel scroll-mt-5">
-      <StepHeader step="5" title="Calcul Spencer" meta="Cercle critique" />
-      <div className="grid grid-cols-3 gap-2">
-        {([
-          ['coarse_step', 'Grossier'],
-          ['fine_step', 'Fin'],
-          ['final_step', 'Final'],
-        ] as Array<['coarse_step' | 'fine_step' | 'final_step', string]>).map(([key, label]) => (
-          <NumberField
-            key={key}
-            label={`${label} (m)`}
-            value={search[key] as number}
-            step={key === 'final_step' ? 0.01 : 0.1}
-            onChange={(value) => updateSearchField(key, value)}
-          />
-        ))}
+      <StepHeader step="4" title="Analyse automatique" meta="Cercle critique" />
+      <div className="rounded-md bg-slate-50 p-3 text-sm font-medium leading-6 text-slate-600">
+        Le logiciel gère automatiquement le calcul interne à partir des données
+        physiques saisies.
       </div>
       <button
         onClick={runCriticalAnalysis}
@@ -123,8 +104,7 @@ export default function HomePage() {
           <div id="water-table" className="scroll-mt-5">
             <WaterTableInput />
           </div>
-          <SpencerSettings />
-          <SearchPanel />
+          <RunPanel />
         </div>
       </aside>
 
@@ -132,7 +112,7 @@ export default function HomePage() {
         <div className="flex items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Étape 3 - Aperçu du modèle
+              Étape 5 - Résultat graphique
             </p>
             <h1 className="text-xl font-bold text-slate-950">Profil du talus et surface de rupture</h1>
           </div>

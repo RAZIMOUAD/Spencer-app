@@ -9,6 +9,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app import config
 from app.schemas import (
     BatchProgress,
     Circle,
@@ -391,9 +392,11 @@ def _try_evaluate_one(
 
     ctx.stats.tested += 1
     try:
+        n_slices = config.auto_slice_count(circle.radius)
+        circle_settings = ctx.settings.model_copy(update={"n_slices": n_slices})
         slices = divide_into_slices(
             circle=circle,
-            n_slices=ctx.settings.n_slices,
+            n_slices=n_slices,
             terrain_pts=ctx.terrain_pts,
             layers=list(ctx.idx.layers),
             water_table=ctx.water_table,
@@ -401,7 +404,7 @@ def _try_evaluate_one(
         )
 
         good = sum(1 for s in slices if s.height > 0)
-        if not slices or good / ctx.settings.n_slices < ctx.search.min_convergence_ratio:
+        if not slices or good / n_slices < ctx.search.min_convergence_ratio:
             ctx.stats.rejected += 1
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
@@ -412,7 +415,7 @@ def _try_evaluate_one(
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
 
-        fs, _theta, converged, _it = solve_spencer(slices, ctx.settings)
+        fs, _theta, converged, _it = solve_spencer(slices, circle_settings)
         if not converged or not math.isfinite(fs) or fs <= 0:
             ctx.stats.rejected += 1
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))

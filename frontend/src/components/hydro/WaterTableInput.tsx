@@ -20,7 +20,7 @@ export default function WaterTableInput() {
           step={0.1}
           value={elevation}
           onChange={(e) =>
-            setWaterTable({ elevation: parseFloat(e.target.value) })
+            { const v = parseFloat(e.target.value); if (isFinite(v)) setWaterTable({ elevation: v }); }
           }
           className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
         />

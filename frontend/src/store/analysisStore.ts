@@ -127,7 +127,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
         layers: state.layers,
         water_table: state.waterTable,
         circle: state.circle,
-        settings: state.settings,
         slope_height: state.slopeHeight,
         slope_length: state.slopeLength,
       });
@@ -147,8 +146,6 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
       const criticalResult = await apiRunCriticalCircle({
         layers: state.layers,
         water_table: state.waterTable,
-        settings: state.settings,
-        search: state.search,
         slope_height: state.slopeHeight,
         slope_length: state.slopeLength,
       });

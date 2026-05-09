@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import math
+import logging
 
 from fastapi import APIRouter
 from pydantic import ValidationError as PydanticValidationError
 
+from app import config
 from app.schemas import (
     AnalysisRequest,
     AnalysisResult,
     Circle,
     CriticalCircleRequest,
     CriticalCircleResult,
+    CriticalSearchSettings,
     JobCreateResponse,
     JobStatus,
     SearchStats,
     Slice,
+    SpencerSettings,
 )
 from app.errors import ValidationError, GeometryError
 from core.geometry import slope_profile, auto_plateaus
@@ -26,11 +30,36 @@ from core.spencer import solve_spencer
 from core.search import find_critical_circle
 
 router = APIRouter()
+logger = logging.getLogger("spencer.analysis")
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _internal_settings(radius: float) -> SpencerSettings:
+    """Return production solver settings hidden from normal users."""
+    return SpencerSettings(
+        n_slices=config.auto_slice_count(radius),
+        tolerance=config.TOL_SPENCER,
+        max_iter=config.MAX_ITER,
+        theta_min=config.THETA_MIN,
+        theta_max=config.THETA_MAX,
+    )
+
+
+def _internal_search() -> CriticalSearchSettings:
+    """Return production critical-circle search settings."""
+    return CriticalSearchSettings(
+        coarse_step=config.STEP_COARSE,
+        fine_step=config.STEP_FINE,
+        final_step=config.STEP_FINAL,
+        top_k_coarse=config.TOP_K_COARSE,
+        top_k_fine=config.TOP_K_FINE,
+        n_radii=config.N_RADII,
+        min_convergence_ratio=config.MIN_CONVERGENCE_RATIO,
+    )
 
 
 def _build_result(
@@ -95,15 +124,26 @@ async def evaluate_circle(req: AnalysisRequest) -> AnalysisResult:
     if circle_errors:
         raise GeometryError("Cercle de glissement invalide", {"errors": circle_errors})
 
+    settings = _internal_settings(req.circle.radius)
     slices = divide_into_slices(
         circle=req.circle,
-        n_slices=req.settings.n_slices,
+        n_slices=settings.n_slices,
         terrain_pts=terrain_pts,
         layers=req.layers,
         water_table=req.water_table,
     )
 
-    fs, theta, converged, iterations = solve_spencer(slices, req.settings)
+    fs, theta, converged, iterations = solve_spencer(slices, settings)
+    logger.info(
+        "evaluate-circle fs=%.4f converged=%s iterations=%s slices=%s circle=(%.3f, %.3f, %.3f)",
+        fs,
+        converged,
+        iterations,
+        len(slices),
+        req.circle.cx,
+        req.circle.cy,
+        req.circle.radius,
+    )
 
     return _build_result(slices, fs, theta, converged, iterations, req.circle)
 
@@ -133,22 +173,37 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
     l_amont, l_aval = auto_plateaus(req.slope_height, req.slope_length)
     terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)
 
+    search = _internal_search()
+    search_settings = _internal_settings(max(req.slope_height, req.slope_length))
     best_circle, min_fs, stats = find_critical_circle(
         terrain_pts=terrain_pts,
         layers=req.layers,
         water_table=req.water_table,
-        settings=req.settings,
-        search=req.search,
+        settings=search_settings,
+        search=search,
     )
 
+    final_settings = _internal_settings(best_circle.radius)
     slices = divide_into_slices(
         circle=best_circle,
-        n_slices=req.settings.n_slices,
+        n_slices=final_settings.n_slices,
         terrain_pts=terrain_pts,
         layers=req.layers,
         water_table=req.water_table,
     )
-    fs, theta, converged, iterations = solve_spencer(slices, req.settings)
+    fs, theta, converged, iterations = solve_spencer(slices, final_settings)
+    logger.info(
+        "critical-circle fs=%.4f search_fs=%.4f converged=%s iterations=%s slices=%s circle=(%.3f, %.3f, %.3f) tested=%s",
+        fs,
+        min_fs,
+        converged,
+        iterations,
+        len(slices),
+        best_circle.cx,
+        best_circle.cy,
+        best_circle.radius,
+        stats.tested,
+    )
     result = _build_result(slices, fs, theta, converged, iterations, best_circle)
 
     return CriticalCircleResult(

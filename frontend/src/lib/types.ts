@@ -82,7 +82,7 @@ export interface AnalysisRequest {
   layers: SoilLayer[];
   water_table: WaterTable;
   circle: Circle;
-  settings: SpencerSettings;
+  settings?: SpencerSettings;
   slope_height: number;
   slope_length: number;
 }
@@ -90,8 +90,8 @@ export interface AnalysisRequest {
 export interface CriticalCircleRequest {
   layers: SoilLayer[];
   water_table: WaterTable;
-  settings: SpencerSettings;
-  search: CriticalSearchSettings;
+  settings?: SpencerSettings;
+  search?: CriticalSearchSettings;
   slope_height: number;
   slope_length: number;
 }

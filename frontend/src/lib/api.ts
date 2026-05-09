@@ -35,13 +35,27 @@ export class ApiError extends Error {
 async function apiFetch<T>(
   path: string,
   init?: RequestInit,
+  timeoutMs = 60_000,
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...init,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError('TIMEOUT', `La requête a expiré après ${timeoutMs / 1000}s. Vérifiez que le serveur backend est démarré.`);
+    }
+    throw new ApiError('NETWORK_ERROR', 'Impossible de joindre le serveur. Vérifiez que le backend est démarré sur le port 8000.');
+  }
+  clearTimeout(timer);
 
   if (!res.ok) {
     let errorPayload: ErrorResponse | null = null;

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+from app import config
 
 
 class TerrainPoint(BaseModel):
@@ -75,22 +76,22 @@ class Slice(BaseModel):
 
 class SpencerSettings(BaseModel):
     n_slices: int = Field(default=20, ge=5, le=200, description="Number of vertical slices")
-    tolerance: float = Field(default=1e-6, gt=0, description="Convergence tolerance for FS")
-    max_iter: int = Field(default=200, ge=10, le=2000, description="Maximum solver iterations")
-    theta_min: float = Field(default=-30.0, description="Min interslice force angle (degrees)")
-    theta_max: float = Field(default=30.0, description="Max interslice force angle (degrees)")
+    tolerance: float = Field(default=config.TOL_SPENCER, gt=0, description="Convergence tolerance for FS")
+    max_iter: int = Field(default=config.MAX_ITER, ge=10, le=2000, description="Maximum solver iterations")
+    theta_min: float = Field(default=config.THETA_MIN, description="Min interslice force angle (degrees)")
+    theta_max: float = Field(default=config.THETA_MAX, description="Max interslice force angle (degrees)")
 
 
 class CriticalSearchSettings(BaseModel):
     """Grid search parameters for finding the critical slip circle."""
-    coarse_step: float = Field(default=1.0, gt=0, description="Coarse grid spacing in metres")
-    fine_step: float = Field(default=0.1, gt=0, description="Fine grid spacing in metres")
-    final_step: float = Field(default=0.01, gt=0, description="Final refinement step in metres")
-    top_k_coarse: int = Field(default=10, ge=1, description="Best circles kept from coarse pass")
-    top_k_fine: int = Field(default=5, ge=1, description="Best circles kept from fine pass")
-    n_radii: int = Field(default=8, ge=2, description="Number of radii tested per centre")
+    coarse_step: float = Field(default=config.STEP_COARSE, gt=0, description="Coarse grid spacing in metres")
+    fine_step: float = Field(default=config.STEP_FINE, gt=0, description="Fine grid spacing in metres")
+    final_step: float = Field(default=config.STEP_FINAL, gt=0, description="Final refinement step in metres")
+    top_k_coarse: int = Field(default=config.TOP_K_COARSE, ge=1, description="Best circles kept from coarse pass")
+    top_k_fine: int = Field(default=config.TOP_K_FINE, ge=1, description="Best circles kept from fine pass")
+    n_radii: int = Field(default=config.N_RADII, ge=2, description="Number of radii tested per centre")
     min_convergence_ratio: float = Field(
-        default=0.05, ge=0, le=1,
+        default=config.MIN_CONVERGENCE_RATIO, ge=0, le=1,
         description="Min fraction of slices with positive height to accept a circle",
     )
 

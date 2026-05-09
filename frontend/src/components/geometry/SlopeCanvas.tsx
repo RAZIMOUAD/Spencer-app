@@ -24,7 +24,8 @@ function layerInterfaces(H: number, layers: SoilLayer[]) {
   const values: number[] = [];
   let z = H;
   for (const layer of layers.slice(0, -1)) {
-    z -= layer.thickness ?? 0;
+    const t = isFinite(layer.thickness ?? 0) ? (layer.thickness ?? 0) : 0;
+    z -= t;
     values.push(z);
   }
   return values;
@@ -39,6 +40,45 @@ function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: nu
   ctx.fillStyle = '#334155';
   ctx.fillText(text, x, y);
   ctx.restore();
+}
+
+function slipArcPoints(
+  circle: Circle,
+  H: number,
+  L: number,
+  upstream: number,
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+) {
+  const points: Array<[number, number]> = [];
+  for (let i = 0; i <= 720; i += 1) {
+    const theta = (i / 720) * Math.PI * 2;
+    const x = circle.cx + circle.radius * Math.cos(theta);
+    const y = circle.cy + circle.radius * Math.sin(theta);
+    const insideModel = x >= xMin && x <= xMax && y >= yMin && y <= yMax;
+    const lowerArc = y <= circle.cy;
+    const belowTerrain = y <= terrainY(x, H, L, upstream) + 0.02;
+    if (insideModel && lowerArc && belowTerrain) {
+      points.push([x, y]);
+    }
+  }
+  return longestContinuousArc(points);
+}
+
+function longestContinuousArc(points: Array<[number, number]>) {
+  if (points.length < 2) return points;
+  const segments: Array<Array<[number, number]>> = [[points[0]]];
+  for (let i = 1; i < points.length; i += 1) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    const gap = Math.hypot(x1 - x0, y1 - y0);
+    const current = segments[segments.length - 1];
+    if (gap > 2.0) segments.push([points[i]]);
+    else current.push(points[i]);
+  }
+  return segments.reduce((best, segment) => (segment.length > best.length ? segment : best), segments[0]);
 }
 
 export default function SlopeCanvas() {
@@ -61,17 +101,12 @@ export default function SlopeCanvas() {
 
     const W = canvas.width;
     const Hpx = canvas.height;
-    const H = Math.max(slopeHeight, 0.1);
-    const L = Math.max(slopeLength, 0.1);
+    const H = isFinite(slopeHeight) && slopeHeight > 0 ? slopeHeight : 10;
+    const L = isFinite(slopeLength) && slopeLength > 0 ? slopeLength : 15;
     const { upstream, downstream } = plateaus(H, L);
     const xTotal = upstream + L + downstream;
     const solvedCircle: Circle | undefined = criticalResult?.critical_circle ?? result?.circle;
-    const previewCircle: Circle = {
-      cx: upstream + L * 0.32,
-      cy: H * 1.15,
-      radius: Math.max(H * 1.35, L * 0.85),
-    };
-    const circle: Circle = solvedCircle ?? previewCircle;
+    const circle: Circle | undefined = solvedCircle;
 
     const terrain = [
       [0, H],
@@ -86,8 +121,10 @@ export default function SlopeCanvas() {
     let yMin = -depth;
     let yMax = H + Math.max(H * 0.22, 2);
 
-    yMin = Math.min(yMin, circle.cy - circle.radius * 0.12);
-    yMax = Math.max(yMax, circle.cy + circle.radius * 0.12);
+    if (circle) {
+      yMin = Math.min(yMin, circle.cy - circle.radius * 0.12);
+      yMax = Math.max(yMax, circle.cy + circle.radius * 0.12);
+    }
 
     const pad = { left: 54, right: 34, top: 34, bottom: 50 };
     const sx = (x: number) => pad.left + ((x - xMin) / (xMax - xMin)) * (W - pad.left - pad.right);
@@ -163,46 +200,66 @@ export default function SlopeCanvas() {
 
     const slices: Slice[] = result?.slices ?? [];
     if (slices.length > 0) {
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.22)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.38)';
+      ctx.lineWidth = 1.2;
       slices.forEach((slc) => {
         ctx.beginPath();
         ctx.moveTo(sx(slc.x_left), sy(slc.y_base));
         ctx.lineTo(sx(slc.x_left), sy(slc.y_top));
         ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sx(slc.x_left), sy(slc.y_base));
+        ctx.lineTo(sx(slc.x_right), sy(slc.y_base));
+        ctx.stroke();
       });
     }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(pad.left, pad.top, W - pad.left - pad.right, Hpx - pad.top - pad.bottom);
-    ctx.clip();
-    ctx.strokeStyle = solvedCircle ? '#b08900' : 'rgba(176, 137, 0, 0.55)';
-    ctx.lineWidth = solvedCircle ? 4 : 3;
-    if (!solvedCircle) ctx.setLineDash([12, 8]);
-    ctx.beginPath();
-    for (let i = 0; i <= 360; i += 1) {
-      const t = (i / 360) * Math.PI * 2;
-      const x = circle.cx + circle.radius * Math.cos(t);
-      const y = circle.cy + circle.radius * Math.sin(t);
-      if (i === 0) ctx.moveTo(sx(x), sy(y));
-      else ctx.lineTo(sx(x), sy(y));
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-    if (circle.cx >= xMin && circle.cx <= xMax && circle.cy >= yMin && circle.cy <= yMax) {
-      ctx.fillStyle = solvedCircle ? '#b08900' : '#c7a33a';
+    if (circle) {
+      const arc = slipArcPoints(circle, H, L, upstream, xMin, xMax, yMin, yMax);
+      if (result?.fs && isFinite(result.fs)) {
+        console.info('[SPENCER-SLOPE] FoS', result.fs.toFixed(4));
+        console.info('[SPENCER-SLOPE] Slip arc points', arc.length);
+      }
+      ctx.save();
       ctx.beginPath();
-      ctx.arc(sx(circle.cx), sy(circle.cy), 4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.rect(pad.left, pad.top, W - pad.left - pad.right, Hpx - pad.top - pad.bottom);
+      ctx.clip();
+      ctx.strokeStyle = '#b08900';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      arc.forEach(([x, y], idx) => {
+        if (idx === 0) ctx.moveTo(sx(x), sy(y));
+        else ctx.lineTo(sx(x), sy(y));
+      });
+      ctx.stroke();
+      ctx.restore();
+
+      if (arc.length >= 2) {
+        const endpoints = [arc[0], arc[arc.length - 1]];
+        endpoints.forEach(([x, y]) => {
+          ctx.fillStyle = '#b08900';
+          ctx.beginPath();
+          ctx.arc(sx(x), sy(y), 5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        console.info('[SPENCER-SLOPE] Slip arc intersections', endpoints.map(([x, y]) => ({
+          x: Number(x.toFixed(3)),
+          y: Number(y.toFixed(3)),
+        })));
+      }
+
+      if (circle.cx >= xMin && circle.cx <= xMax && circle.cy >= yMin && circle.cy <= yMax) {
+        ctx.fillStyle = '#b08900';
+        ctx.beginPath();
+        ctx.arc(sx(circle.cx), sy(circle.cy), 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      drawLabel(ctx, 'Cercle critique calculé', sx(Math.max(upstream * 0.7, 2)), sy(H + Math.max(1, H * 0.1)));
     }
-    drawLabel(
-      ctx,
-      solvedCircle ? 'Cercle critique calculé' : 'Surface indicative avant calcul',
-      sx(Math.max(upstream * 0.7, 2)),
-      sy(H + Math.max(1, H * 0.1)),
-    );
+
+    if (result?.fs && isFinite(result.fs)) {
+      drawLabel(ctx, `FoS = ${result.fs.toFixed(3)}`, sx(upstream + L * 0.1), sy(H + Math.max(1.6, H * 0.18)));
+    }
 
     drawLabel(ctx, `H = ${H.toFixed(2)} m`, sx(upstream * 0.16), sy(H / 2));
     drawLabel(ctx, `L = ${L.toFixed(2)} m`, sx(upstream + L * 0.45), sy(-depth * 0.58));

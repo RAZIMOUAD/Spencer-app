@@ -17,6 +17,8 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+const DEBUG_RESULTS = process.env.NEXT_PUBLIC_DEBUG_MODE === 'true';
+
 export default function ResultsSummary() {
   const { result, criticalResult, status, errors } = useAnalysisStore((s) => ({
     result: s.result,
@@ -35,9 +37,9 @@ export default function ResultsSummary() {
         </div>
         <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-sm font-medium text-slate-500">
           <ol className="list-decimal space-y-1 pl-4">
-            <li>Vérifiez la géométrie et les couches.</li>
-            <li>Contrôlez l'aperçu au centre.</li>
-            <li>Lancez le calcul Spencer.</li>
+            <li>Saisissez la géométrie du talus.</li>
+            <li>Définissez les couches de sol et la nappe.</li>
+            <li>Lancez le calcul automatique.</li>
           </ol>
         </div>
         <button
@@ -58,7 +60,7 @@ export default function ResultsSummary() {
           <span>Calcul</span>
         </div>
         <div className="rounded-md bg-slate-50 p-5 text-sm font-semibold text-slate-600">
-          Calcul Spencer en cours...
+          Calcul automatique en cours...
         </div>
       </section>
     );
@@ -78,7 +80,7 @@ export default function ResultsSummary() {
     );
   }
 
-  if (!result) return null;
+  if (!result || !isFinite(result.fs)) return null;
 
   const tone = fsTone(result.fs);
 
@@ -96,17 +98,6 @@ export default function ResultsSummary() {
         </div>
       </section>
 
-      <section className="tool-panel">
-        <div className="section-heading">
-          <h2>Équilibre</h2>
-          <span>Spencer</span>
-        </div>
-        <Metric label="Angle θ" value={`${result.theta.toFixed(2)}°`} />
-        <Metric label="Tranches" value={`${result.slices.length}`} />
-        <Metric label="Itérations" value={`${result.iterations}`} />
-        <Metric label="Convergence" value={result.converged ? 'Oui' : 'Non'} />
-      </section>
-
       {criticalResult && (
         <>
           <section className="tool-panel">
@@ -121,26 +112,41 @@ export default function ResultsSummary() {
             <Metric label="Rayon" value={`${criticalResult.critical_circle.radius.toFixed(2)} m`} />
           </section>
 
-          <section className="tool-panel">
-            <div className="section-heading">
-              <h2>Recherche</h2>
-              <span>Grille</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="result-tile">
-                <strong>{criticalResult.stats.tested}</strong>
-                <span>testés</span>
-              </div>
-              <div className="result-tile text-emerald-700">
-                <strong>{criticalResult.stats.converged}</strong>
-                <span>convergés</span>
-              </div>
-              <div className="result-tile text-red-700">
-                <strong>{criticalResult.stats.rejected}</strong>
-                <span>rejetés</span>
-              </div>
-            </div>
-          </section>
+          {DEBUG_RESULTS && (
+            <>
+              <section className="tool-panel">
+                <div className="section-heading">
+                  <h2>Debug calcul</h2>
+                  <span>Développeur</span>
+                </div>
+                <Metric label="Angle θ" value={isFinite(result.theta) ? `${result.theta.toFixed(2)}°` : '—'} />
+                <Metric label="Tranches" value={`${result.slices?.length ?? '—'}`} />
+                <Metric label="Itérations" value={`${result.iterations ?? '—'}`} />
+                <Metric label="Convergence" value={result.converged ? 'Oui' : 'Non'} />
+              </section>
+
+              <section className="tool-panel">
+                <div className="section-heading">
+                  <h2>Debug recherche</h2>
+                  <span>Grille</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="result-tile">
+                    <strong>{criticalResult.stats.tested}</strong>
+                    <span>testés</span>
+                  </div>
+                  <div className="result-tile text-emerald-700">
+                    <strong>{criticalResult.stats.converged}</strong>
+                    <span>convergés</span>
+                  </div>
+                  <div className="result-tile text-red-700">
+                    <strong>{criticalResult.stats.rejected}</strong>
+                    <span>rejetés</span>
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
         </>
       )}
     </div>

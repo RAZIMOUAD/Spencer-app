@@ -4,14 +4,14 @@ import { useState } from 'react';
 import { useAnalysisStore } from '@/store/analysisStore';
 import type { SoilLayer } from '@/lib/types';
 
-let nextId = 2;
-
 type DraftLayer = SoilLayer & { mode: 'create' | 'edit' };
 
-function emptyLayer(): SoilLayer {
+function emptyLayer(existingLayers: { id: number }[]): SoilLayer {
+  const maxId = existingLayers.reduce((m, l) => Math.max(m, l.id), 0);
+  const id = maxId + 1;
   return {
-    id: nextId++,
-    name: `C${nextId - 1}`,
+    id,
+    name: `C${id}`,
     gamma: 20.0,
     cohesion: 10.0,
     phi_deg: 30.0,
@@ -46,7 +46,7 @@ function NumberInput({
           max={max}
           step={step}
           value={value ?? ''}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
+          onChange={(e) => { const v = parseFloat(e.target.value); if (isFinite(v)) onChange(v); }}
           className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
         />
         <span className="w-14 text-xs font-bold text-slate-400">{unit}</span>
@@ -61,7 +61,7 @@ export default function LayerPanel() {
   const [draft, setDraft] = useState<DraftLayer | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const openCreate = () => setDraft({ ...emptyLayer(), mode: 'create' });
+  const openCreate = () => setDraft({ ...emptyLayer(layers), mode: 'create' });
   const openEdit = (layer: SoilLayer) => setDraft({ ...layer, mode: 'edit' });
 
   const saveDraft = () => {

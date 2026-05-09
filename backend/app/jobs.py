@@ -10,13 +10,16 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+from app import config
 from app.schemas import (
     BatchProgress,
     CriticalCircleRequest,
     CriticalCircleResult,
+    CriticalSearchSettings,
     JobCreateResponse,
     JobStatus,
     Slice,
+    SpencerSettings,
 )
 from app.errors import AnalysisCancelledError, SpencerBaseError
 from core.cost import estimate_cost
@@ -49,7 +52,9 @@ def create_job(req: CriticalCircleRequest) -> JobCreateResponse:
     n_layers = len(req.layers)
 
     # Raises TooManyCandidatesError / PrecisionTooExpensiveError if over limits
-    cost = estimate_cost(H, n_layers, req.settings, req.search)
+    settings = _internal_settings(max(req.slope_height, req.slope_length))
+    search = _internal_search()
+    cost = estimate_cost(H, n_layers, settings, search)
 
     job_id = str(uuid.uuid4())
     now = time.time()
@@ -145,24 +150,27 @@ def _run_job_sync(
         l_amont, l_aval = auto_plateaus(req.slope_height, req.slope_length)
         terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)
 
+        settings = _internal_settings(max(req.slope_height, req.slope_length))
+        search = _internal_search()
         best_circle, min_fs, stats = find_critical_circle(
             terrain_pts=terrain_pts,
             layers=req.layers,
             water_table=req.water_table,
-            settings=req.settings,
-            search=req.search,
+            settings=settings,
+            search=search,
             cancel_event=cancel_event,
         )
 
         # Full Spencer result for the critical circle
+        final_settings = _internal_settings(best_circle.radius)
         slices = divide_into_slices(
             circle=best_circle,
-            n_slices=req.settings.n_slices,
+            n_slices=final_settings.n_slices,
             terrain_pts=terrain_pts,
             layers=req.layers,
             water_table=req.water_table,
         )
-        fs, theta, converged, iterations = solve_spencer(slices, req.settings)
+        fs, theta, converged, iterations = solve_spencer(slices, final_settings)
         enriched = _enrich_slices(slices, fs)
 
         from app.schemas import AnalysisResult
@@ -219,3 +227,25 @@ def _enrich_slices(slices: list[Slice], fs: float) -> list[Slice]:
         ) / fs
         enriched.append(slc.model_copy(update={"resisting": resisting}))
     return enriched
+
+
+def _internal_settings(radius: float) -> SpencerSettings:
+    return SpencerSettings(
+        n_slices=config.auto_slice_count(radius),
+        tolerance=config.TOL_SPENCER,
+        max_iter=config.MAX_ITER,
+        theta_min=config.THETA_MIN,
+        theta_max=config.THETA_MAX,
+    )
+
+
+def _internal_search() -> CriticalSearchSettings:
+    return CriticalSearchSettings(
+        coarse_step=config.STEP_COARSE,
+        fine_step=config.STEP_FINE,
+        final_step=config.STEP_FINAL,
+        top_k_coarse=config.TOP_K_COARSE,
+        top_k_fine=config.TOP_K_FINE,
+        n_radii=config.N_RADII,
+        min_convergence_ratio=config.MIN_CONVERGENCE_RATIO,
+    )

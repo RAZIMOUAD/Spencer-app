@@ -83,7 +83,8 @@ def solve_spencer(
 
     if not math.isfinite(fs) or fs <= 0:
         raise NonFiniteValueError(
-            f"FS non physique : {fs}.",
+            "Le calcul n'a pas produit de facteur de sécurité valide pour cette surface de rupture. "
+            "Essayez de modifier la position ou le rayon du cercle.",
             {"fs": fs, "theta_deg": math.degrees(theta_star)},
         )
 
@@ -166,12 +167,15 @@ def _bishop_iterate(
     denom = sum(s.weight * math.sin(math.radians(s.alpha_deg)) for s in slices)
     if denom < _EPS:
         raise SpencerConvergenceError(
-            "Σ(W·sin α) ≤ 0 : le cercle de glissement ne génère pas de force motrice. "
-            "Repositionnez le cercle — la majorité des tranches doit avoir α > 0.",
+            "Le cercle de rupture ne génère pas de poussée sur le talus. "
+            "Repositionnez-le pour qu'il coupe davantage le versant (déplacez le centre ou agrandissez le rayon).",
             {"sum_W_sin_alpha": denom},
         )
 
-    fs = 1.5
+    # Première approximation comme dans le cours :
+    # N ≈ W cos(α), puis FS0 = Σ[c·l + (N - U)tanφ] / Σ(W sinα).
+    # Les itérations suivantes raffinent ce FS jusqu'à convergence.
+    fs = _initial_course_factor_of_safety(slices, denom)
     for it in range(max_iter):
         num = 0.0
         for slc in slices:
@@ -184,7 +188,8 @@ def _bishop_iterate(
             m_a = cos_a * (1.0 + tan_a * tan_phi / fs)
             if abs(m_a) < _EPS:
                 raise NumericalInstabilityError(
-                    f"m_α ≈ 0 pour la tranche {slc.index} (FS={fs:.4f}).",
+                    f"Instabilité numérique détectée sur la section {slc.index + 1} du calcul. "
+                    "Essayez de modifier l'angle de frottement φ' ou la position du cercle de rupture.",
                     {"slice_index": slc.index, "alpha_deg": slc.alpha_deg, "fs": fs},
                 )
 
@@ -195,16 +200,34 @@ def _bishop_iterate(
         fs_new = num / denom
         if not math.isfinite(fs_new):
             raise NonFiniteValueError(
-                f"FS non fini à l'itération {it}.", {"iteration": it, "fs_new": fs_new}
+                "Le calcul a produit une valeur non physique. "
+                "Vérifiez les paramètres mécaniques des couches (γ, c', φ') et la géométrie du talus.",
+                {"iteration": it, "fs_new": fs_new},
             )
         if abs(fs_new - fs) < tol:
-            return fs_new, it + 1
+            return fs_new, it + 2
         fs = fs_new
 
     raise SpencerConvergenceError(
-        f"Bishop n'a pas convergé en {max_iter} itérations.",
+        f"Le calcul n'a pas abouti à une solution stable après {max_iter} itérations. "
+        "Essayez avec un cercle différent ou ajustez les paramètres mécaniques des couches.",
         {"iterations": max_iter, "last_fs": fs},
     )
+
+
+def _initial_course_factor_of_safety(slices: list[Slice], denom: float) -> float:
+    """Initial FS from the course approximation N ≈ W·cos(α)."""
+    num = 0.0
+    for slc in slices:
+        alpha = math.radians(slc.alpha_deg)
+        phi = math.radians(slc.phi_deg)
+        normal_eff = slc.weight * math.cos(alpha) - slc.pore_force
+        num += slc.cohesion * slc.base_length + normal_eff * math.tan(phi)
+
+    fs0 = num / denom
+    if not math.isfinite(fs0) or fs0 <= 0:
+        return 1.5
+    return fs0
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +278,8 @@ def _force_sweep(slices: list[Slice], fs: float, theta: float) -> float:
 
         if abs(m_a) < _EPS:
             raise NumericalInstabilityError(
-                f"m_α ≈ 0 dans force_sweep pour tranche {slc.index}.",
+                f"Instabilité numérique sur la section {slc.index + 1}. "
+                "Vérifiez que l'angle de frottement φ' est compris entre 1° et 89°.",
                 {"slice_index": slc.index},
             )
 
@@ -271,7 +295,8 @@ def _force_sweep(slices: list[Slice], fs: float, theta: float) -> float:
         denom = 1.0 + n_a * T / m_a
         if abs(denom) < _EPS:
             raise NumericalInstabilityError(
-                f"Dénominateur ΔE ≈ 0 pour tranche {slc.index} (θ={math.degrees(theta):.2f}°).",
+                f"Instabilité numérique sur la section {slc.index + 1}. "
+                "Élargissez la plage d'angle θ dans les paramètres Spencer (θ min / θ max).",
                 {"slice_index": slc.index, "theta_deg": math.degrees(theta)},
             )
 
@@ -279,7 +304,8 @@ def _force_sweep(slices: list[Slice], fs: float, theta: float) -> float:
 
         if not math.isfinite(E):
             raise NonFiniteValueError(
-                f"E non fini après tranche {slc.index}.",
+                "Le calcul des forces interlamelles a produit une valeur non physique. "
+                "Vérifiez les paramètres de sol et la géométrie du cercle.",
                 {"slice_index": slc.index, "E": E},
             )
 
@@ -308,14 +334,15 @@ def _brent(
 
     if not math.isfinite(fa) or not math.isfinite(fb):
         raise SpencerBracketError(
-            f"f non finie aux bornes : f({a:.4f})={fa}, f({b:.4f})={fb}.",
+            "Impossible d'équilibrer les forces pour ce cercle de rupture. "
+            "Élargissez la plage d'angle θ (θ min / θ max) dans les paramètres Spencer.",
             {"a": a, "b": b, "fa": fa, "fb": fb},
         )
 
     if fa * fb > 0:
         raise SpencerBracketError(
-            f"Pas de changement de signe dans [{a:.4f}, {b:.4f}] "
-            f"(f(a)={fa:.3e}, f(b)={fb:.3e}).",
+            "L'équilibre des forces n'est pas trouvable dans la plage d'angles θ définie. "
+            "Élargissez θ min et θ max dans les paramètres Spencer (par exemple −45° à +45°).",
             {"a": a, "b": b, "fa": fa, "fb": fb},
         )
 
@@ -372,9 +399,14 @@ def _brent(
         fb = f(b)
 
         if not math.isfinite(fb):
-            raise NonFiniteValueError(f"f non fini à b={b:.6f}.", {"b": b})
+            raise NonFiniteValueError(
+                "Valeur non physique rencontrée lors de la recherche d'équilibre. "
+                "Vérifiez les paramètres de sol et la géométrie.",
+                {"b": b},
+            )
 
     raise SpencerConvergenceError(
-        f"Brent n'a pas convergé en {max_iter} itérations.",
+        "L'équilibre des forces n'a pas convergé. "
+        "Essayez d'élargir la plage d'angle θ (θ min / θ max) dans les paramètres Spencer.",
         {"iterations": max_iter},
     )

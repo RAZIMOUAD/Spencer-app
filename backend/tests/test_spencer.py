@@ -211,6 +211,28 @@ def test_compute_residuals_force():
     )
 
 
+def test_bishop_fixed_point_respects_tolerance():
+    """One more Bishop update after convergence must change FS by < tol."""
+    tol = 1e-4
+    slices = _make_slices()
+    fs, _ = _bishop_iterate(slices, tol, 100)
+    denom = sum(s.weight * math.sin(math.radians(s.alpha_deg)) for s in slices)
+    num = 0.0
+    for slc in slices:
+        alpha = math.radians(slc.alpha_deg)
+        phi = math.radians(slc.phi_deg)
+        cos_a = math.cos(alpha)
+        tan_a = math.tan(alpha)
+        tan_phi = math.tan(phi)
+        m_a = cos_a * (1.0 + tan_a * tan_phi / fs)
+        ub = slc.pore_pressure * slc.width
+        N_prime = (slc.weight - ub) / m_a
+        num += slc.cohesion * slc.base_length + N_prime * tan_phi
+
+    fs_next = num / denom
+    assert abs(fs_next - fs) < tol
+
+
 def test_compute_residuals_sum_W_positive():
     slices = _make_slices()
     fs, theta, _, _ = solve_spencer(slices, SpencerSettings())

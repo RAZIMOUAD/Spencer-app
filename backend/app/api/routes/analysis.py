@@ -116,18 +116,18 @@ async def evaluate_circle(req: AnalysisRequest) -> AnalysisResult:
     t0 = time.perf_counter()
     geom_errors = validate_geometry(req.slope_height, req.slope_length)
     if geom_errors:
-        raise ValidationError("Géométrie invalide", {"errors": geom_errors})
+        raise ValidationError("Dimensions du talus invalides", {"errors": geom_errors})
 
     layer_errors = validate_layers(req.layers, req.slope_height)
     if layer_errors:
-        raise ValidationError("Paramètres de couches invalides", {"errors": layer_errors})
+        raise ValidationError("Paramètres de sol invalides", {"errors": layer_errors})
 
     l_amont, l_aval = auto_plateaus(req.slope_height, req.slope_length)
     terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)
 
     circle_errors = validate_circle(req.circle, terrain_pts)
     if circle_errors:
-        raise GeometryError("Cercle de glissement invalide", {"errors": circle_errors})
+        raise GeometryError("Cercle de rupture invalide", {"errors": circle_errors})
 
     settings = _internal_settings(auto_slice_count_for_circle(req.circle, terrain_pts))
     slices = divide_into_slices(
@@ -171,11 +171,11 @@ async def critical_circle(req: CriticalCircleRequest) -> CriticalCircleResult:
     t0 = time.perf_counter()
     geom_errors = validate_geometry(req.slope_height, req.slope_length)
     if geom_errors:
-        raise ValidationError("Géométrie invalide", {"errors": geom_errors})
+        raise ValidationError("Dimensions du talus invalides", {"errors": geom_errors})
 
     layer_errors = validate_layers(req.layers, req.slope_height)
     if layer_errors:
-        raise ValidationError("Paramètres de couches invalides", {"errors": layer_errors})
+        raise ValidationError("Paramètres de sol invalides", {"errors": layer_errors})
 
     l_amont, l_aval = auto_plateaus(req.slope_height, req.slope_length)
     terrain_pts = slope_profile(req.slope_height, req.slope_length, l_amont, l_aval)

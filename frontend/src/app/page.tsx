@@ -1,31 +1,61 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useAnalysisStore } from '@/store/analysisStore';
 import LayerPanel from '@/components/layers/LayerPanel';
 import SlopeCanvas from '@/components/geometry/SlopeCanvas';
 import ResultsSummary from '@/components/results/ResultsSummary';
 import WaterTableInput from '@/components/hydro/WaterTableInput';
 
+function parseDecimalInput(value: string) {
+  const normalized = value.replace(',', '.').trim();
+  if (normalized === '') return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function NumberField({
   label,
   value,
   onChange,
-  step = 0.5,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
-  step?: number;
 }) {
+  const [draftValue, setDraftValue] = useState(String(value));
+
+  useEffect(() => {
+    setDraftValue(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = parseDecimalInput(draftValue);
+    if (parsed !== null && parsed > 0) {
+      onChange(parsed);
+      setDraftValue(String(parsed));
+      return;
+    }
+    setDraftValue(String(value));
+  };
+
   return (
     <label className="grid gap-1 text-xs font-semibold text-slate-600">
       <span>{label}</span>
       <input
-        type="number"
-        min={0.1}
-        step={step}
-        value={value}
-        onChange={(e) => { const v = Number(e.target.value); if (isFinite(v) && v > 0) onChange(v); }}
+        type="text"
+        inputMode="decimal"
+        value={draftValue}
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraftValue(next);
+          const parsed = parseDecimalInput(next);
+          if (parsed !== null && parsed > 0) onChange(parsed);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
         className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
       />
     </label>

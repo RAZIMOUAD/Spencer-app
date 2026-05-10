@@ -5,11 +5,13 @@
 import { create } from 'zustand';
 import {
   runAnalysis as apiRunAnalysis,
-  runCriticalCircle as apiRunCriticalCircle,
+  createAnalysisJob,
+  getAnalysisJob,
 } from '@/lib/api';
 import type {
   AnalysisResult,
   AnalysisStatus,
+  BatchProgress,
   Circle,
   CriticalCircleResult,
   CriticalSearchSettings,
@@ -37,10 +39,10 @@ const DEFAULT_CIRCLE: Circle = { cx: 0.0, cy: 20.0, radius: 15.0 };
 const DEFAULT_SEARCH: CriticalSearchSettings = {
   coarse_step: 3.0,
   fine_step: 1.0,
-  final_step: 0.5,
+  final_step: 1.0,
   top_k_coarse: 5,
   top_k_fine: 3,
-  n_radii: 5,
+  n_radii: 4,
   min_convergence_ratio: 0.05,
 };
 
@@ -72,6 +74,7 @@ interface AnalysisState {
   // --- async state ---
   result: AnalysisResult | null;
   criticalResult: CriticalCircleResult | null;
+  progress: BatchProgress | null;
   status: AnalysisStatus;
   errors: string[];
 
@@ -103,6 +106,7 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   slopeLength: 15.0,
   result: null,
   criticalResult: null,
+  progress: null,
   status: 'idle',
   errors: [],
 
@@ -140,40 +144,87 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
 
   runCriticalAnalysis: async () => {
     const state = get();
-    set({ status: 'loading', errors: [], result: null, criticalResult: null });
+    set({ status: 'loading', errors: [], result: null, criticalResult: null, progress: null });
 
     try {
-      const criticalResult = await apiRunCriticalCircle({
+      const jobResp = await createAnalysisJob({
         layers: state.layers,
         water_table: state.waterTable,
         slope_height: state.slopeHeight,
         slope_length: state.slopeLength,
       });
-      set({
-        result: criticalResult.result,
-        criticalResult,
-        circle: criticalResult.critical_circle,
-        status: 'done',
-      });
+
+      const jobId = jobResp.job_id;
+      const startedAt = Date.now();
+      const MAX_WAIT_MS = 15 * 60 * 1000; // 15 min hard limit
+
+      const poll = async (): Promise<void> => {
+        if (Date.now() - startedAt > MAX_WAIT_MS) {
+          set({
+            status: 'error',
+            errors: ['Le calcul a dépassé 15 minutes. Augmentez les valeurs Grossier / Fin / Final pour accélérer.'],
+            progress: null,
+          });
+          return;
+        }
+
+        const job = await getAnalysisJob(jobId);
+
+        if (job.progress) {
+          set({ progress: job.progress });
+        }
+
+        if (job.state === 'done' && job.result) {
+          set({
+            result: job.result.result,
+            criticalResult: job.result,
+            circle: job.result.critical_circle,
+            status: 'done',
+            progress: null,
+          });
+          return;
+        }
+
+        if (job.state === 'failed') {
+          set({
+            status: 'error',
+            errors: [job.error?.message ?? 'Erreur de calcul inconnue.'],
+            progress: null,
+          });
+          return;
+        }
+
+        if (job.state === 'cancelled') {
+          set({ status: 'error', errors: ['Le calcul a été annulé.'], progress: null });
+          return;
+        }
+
+        // Still pending / running — wait 1 s then poll again
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        return poll();
+      };
+
+      await poll();
+
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Erreur inconnue';
-      set({ status: 'error', errors: [message] });
+      const message = err instanceof Error ? err.message : 'Erreur inconnue';
+      set({ status: 'error', errors: [message], progress: null });
     }
   },
 
   // --- reset ---
   reset: () =>
     set({
-      layers: DEFAULT_LAYERS,
-      waterTable: DEFAULT_WATER_TABLE,
-      circle: DEFAULT_CIRCLE,
-      settings: DEFAULT_SETTINGS,
-      search: DEFAULT_SEARCH,
+      layers: [...DEFAULT_LAYERS],
+      waterTable: { ...DEFAULT_WATER_TABLE },
+      circle: { ...DEFAULT_CIRCLE },
+      settings: { ...DEFAULT_SETTINGS },
+      search: { ...DEFAULT_SEARCH },
       slopeHeight: 10.0,
       slopeLength: 15.0,
       result: null,
       criticalResult: null,
+      progress: null,
       status: 'idle',
       errors: [],
     }),

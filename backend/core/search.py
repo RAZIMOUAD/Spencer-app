@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -49,6 +49,7 @@ def find_critical_circle(
     search: CriticalSearchSettings,
     cancel_event: Optional[threading.Event] = None,
     timeout_sec: Optional[float] = None,
+    on_progress: Optional[Callable[[BatchProgress], None]] = None,
 ) -> tuple[Circle, float, SearchStats]:
     """
     Search for the slip circle with the minimum FS using a 3-pass grid strategy.
@@ -78,17 +79,21 @@ def find_critical_circle(
     AnalysisTimeoutError     — wall-clock deadline exceeded.
     """
     if len(terrain_pts) < 2:
-        raise SearchDomainError("Le profil du terrain doit contenir au moins 2 points.")
+        raise SearchDomainError("Le profil du talus est invalide. Vérifiez les dimensions saisies.")
 
     H = max(pt.y for pt in terrain_pts) - min(pt.y for pt in terrain_pts)
     if H < 1e-3:
-        raise SearchDomainError(f"Hauteur de talus trop faible : H = {H:.4f} m.")
+        raise SearchDomainError(
+            f"La hauteur du talus est trop faible pour lancer l'analyse ({H:.2f} m). "
+            "Augmentez la valeur H."
+        )
 
     # Precompile layer index — reused across all circles in all passes
     idx = LayerIndex.build(layers, H)
     cache = CircleCache(maxsize=20_000)
     stats = SearchStats(tested=0, converged=0, rejected=0)
     deadline = time.monotonic() + timeout_sec if timeout_sec else None
+    t0 = time.monotonic()
 
     cx_min, cx_max, cy_min, cy_max, r_min, r_max = _search_domain(terrain_pts, H)
 
@@ -107,14 +112,24 @@ def find_critical_circle(
         r_min=r_min, r_max=r_max,
     )
 
+    # Estimate total batches for coarse pass progress reporting
+    if on_progress:
+        n_cx = max(1, int((cx_max - cx_min) / search.coarse_step) + 1)
+        n_cy = max(1, int((cy_max - cy_min) / search.coarse_step) + 1)
+        batches_total = max(1, (n_cx * n_cy * search.n_radii) // _BATCH_SIZE)
+    else:
+        batches_total = 0
+
     # --- Pass 1: coarse grid over full domain ---
     candidates_1 = _batch_grid_search(
-        ctx, cx_min, cx_max, cy_min, cy_max, search.coarse_step, r_min, r_max
+        ctx, cx_min, cx_max, cy_min, cy_max, search.coarse_step, r_min, r_max,
+        on_progress=on_progress, t0=t0, batches_total=batches_total,
     )
     if not candidates_1:
         raise NoValidCircleError(
-            "Passe grossière : aucun cercle n'a convergé. "
-            "Vérifiez les paramètres mécaniques et la géométrie.",
+            "Aucune surface de rupture valide n'a été trouvée sur ce talus. "
+            "Vérifiez les paramètres mécaniques des couches (γ, c', φ') "
+            "et les dimensions du talus (H, L).",
             {"tested": stats.tested, "rejected": stats.rejected},
         )
 
@@ -286,12 +301,12 @@ def _search_domain(
     slope_width = max(toe_x - crest_x, H)
 
     return (
-        max(x_min, crest_x - 0.60 * slope_width),  # centre near slope body
-        min(x_max, toe_x + 0.60 * slope_width),
+        max(x_min, crest_x - 0.80 * slope_width),  # allow local and global centres
+        min(x_max, toe_x + 1.10 * slope_width),
         y_max,                                      # centre above crest
         y_max + 2.0 * H,
-        max(0.60 * H, 0.20 * slope_width, 1e-6),   # avoid tiny local arcs
-        min(3.0 * H, 1.25 * slope_width),          # avoid excessive radii
+        max(0.50 * H, 0.12 * slope_width, 1e-6),   # allow smaller local mechanisms
+        min(4.0 * H, 2.50 * slope_width),          # allow deeper global mechanisms
     )
 
 
@@ -301,8 +316,13 @@ def _batch_grid_search(
     cy_lo: float, cy_hi: float,
     step: float,
     r_min: float, r_max: float,
+    on_progress: Optional[Callable[[BatchProgress], None]] = None,
+    t0: float = 0.0,
+    batches_total: int = 0,
 ) -> list[_Candidate]:
     candidates: list[_Candidate] = []
+    n = 0
+    batch_idx = 0
     for circle in _enumerate_grid(cx_lo, cx_hi, cy_lo, cy_hi, step, r_min, r_max, ctx.search.n_radii):
         _check_cancel_timeout(ctx)
         fs = _try_evaluate_one(ctx, circle, ctx.best_fs)
@@ -310,6 +330,21 @@ def _batch_grid_search(
             candidates.append(_Candidate(circle=circle, fs=fs))
             if ctx.best_fs is None or fs < ctx.best_fs:
                 ctx.best_fs = fs
+        n += 1
+        if on_progress and n % _BATCH_SIZE == 0:
+            batch_idx += 1
+            best = min(candidates, key=lambda c: c.fs) if candidates else None
+            on_progress(BatchProgress(
+                batch_index=batch_idx,
+                batches_total=batches_total,
+                tested_so_far=ctx.stats.tested,
+                converged_so_far=ctx.stats.converged,
+                rejected_so_far=ctx.stats.rejected,
+                best_fs_so_far=best.fs if best else None,
+                best_circle_so_far=best.circle if best else None,
+                elapsed_seconds=round(time.monotonic() - t0, 2),
+                cancelled=False,
+            ))
     return candidates
 
 
@@ -390,6 +425,11 @@ def _try_evaluate_one(
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
 
+        if not _circle_arc_has_realistic_curvature(circle, ctx.terrain_pts):
+            ctx.stats.rejected += 1
+            ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
+            return None
+
         n_slices = auto_slice_count_for_circle(circle, ctx.terrain_pts)
         circle_settings = ctx.settings.model_copy(update={"n_slices": n_slices})
         slices = divide_into_slices(
@@ -409,12 +449,6 @@ def _try_evaluate_one(
             return None
 
         if not _slices_cover_slope_body(slices, ctx.terrain_pts):
-            ctx.stats.rejected += 1
-            ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
-            return None
-
-        # Early stopping: rough driving-force check before full Spencer
-        if best_fs is not None and _driving_ratio(slices) < 1.0 / (best_fs * (1 + _EARLY_STOP_MARGIN)):
             ctx.stats.rejected += 1
             ctx.cache.put(circle.cx, circle.cy, circle.radius, float("inf"))
             return None
@@ -474,12 +508,62 @@ def _circle_has_realistic_terrain_intersections(
     entry_x, entry_y = entry
     exit_x, exit_y = exit_
 
-    entry_high = entry_y >= y_min + 0.55 * height
-    entry_near_crest = entry_x <= crest_x + 0.35 * slope_width
-    exit_downhill = exit_y <= y_min + 0.70 * height
-    exit_near_toe = exit_x >= crest_x + 0.55 * slope_width
+    entry_high = entry_y >= y_min + 0.50 * height
+    entry_near_crest = entry_x <= crest_x + 0.45 * slope_width
+    exit_downhill = exit_y <= y_min + 0.80 * height
+    exit_near_toe = exit_x >= crest_x + 0.35 * slope_width
 
     return entry_high and entry_near_crest and exit_downhill and exit_near_toe
+
+
+def _circle_arc_has_realistic_curvature(
+    circle: Circle,
+    terrain_pts: list[TerrainPoint],
+) -> bool:
+    """
+    Reject flat slip arcs using the sagitta-to-chord ratio.
+
+    The sagitta is the perpendicular depth from the chord (entry→exit) to the
+    arc's deepest point.  For any chord with midpoint M and circle centre C:
+        sagitta = R − dist(C, M)
+
+    A realistic slip surface must satisfy sagitta / chord ≥ 0.10.
+    Flatter arcs represent nearly-horizontal failure planes that are
+    geotechnically implausible for a circular slip mechanism.
+
+    Also rejects circles where the arc's lowest point cannot reach below the
+    upper 40 % of the slope height (arc too shallow to mobilise a real mass).
+    """
+    intersections = _circle_terrain_intersections(circle, terrain_pts)
+    if len(intersections) < 2:
+        return False
+
+    entry_x, entry_y = intersections[0]
+    exit_x, exit_y = intersections[-1]
+
+    chord_len = math.hypot(exit_x - entry_x, exit_y - entry_y)
+    if chord_len < 1e-6:
+        return False
+
+    # Sagitta = R − dist(centre, chord-midpoint)
+    mid_x = (entry_x + exit_x) / 2.0
+    mid_y = (entry_y + exit_y) / 2.0
+    dist_to_mid = math.hypot(mid_x - circle.cx, mid_y - circle.cy)
+    sagitta = circle.radius - dist_to_mid
+
+    y_min = min(pt.y for pt in terrain_pts)
+    y_max = max(pt.y for pt in terrain_pts)
+    H = y_max - y_min
+    curvature_limit = 0.055 if circle.radius >= 2.0 * H else 0.08
+    if sagitta < curvature_limit * chord_len:
+        return False  # arc is too flat
+
+    # Absolute lowest point of the circle must reach the lower 60 % of slope height
+    arc_lowest_y = circle.cy - circle.radius
+    if arc_lowest_y > y_min + 0.70 * H:
+        return False  # circle bottom doesn't penetrate the slope body
+
+    return True
 
 
 def _slices_cover_slope_body(
@@ -503,15 +587,20 @@ def _slices_cover_slope_body(
     if slope_width <= 1e-9:
         return False
 
-    min_span = max(0.70 * slope_width, 0.60 * height)
-    min_depth = y_min + 0.20 * height
-    min_area = 0.15 * slope_width * height
+    is_global_candidate = right_x >= toe_x - 0.10 * slope_width
+    min_span = (
+        max(0.55 * slope_width, 0.60 * height)
+        if is_global_candidate
+        else max(0.25 * slope_width, 0.75 * height)
+    )
+    min_depth = y_min + (0.35 * height if is_global_candidate else 0.45 * height)
+    min_area = (0.10 if is_global_candidate else 0.06) * slope_width * height
 
     return (
         span >= min_span
         and left_x < toe_x
-        and right_x > crest_x
-        and min_base_y <= min_depth
+        and right_x > crest_x + 0.25 * slope_width
+        and min_base_y <= min_depth + 1e-3  # +1mm tolerance for floating-point rounding
         and area >= min_area
     )
 
@@ -582,12 +671,13 @@ def _check_cancel_timeout(ctx: _SearchCtx) -> None:
     from app.errors import AnalysisTimeoutError
     if ctx.cancel_event and ctx.cancel_event.is_set():
         raise AnalysisCancelledError(
-            "L'analyse a été annulée par l'utilisateur.",
+            "Le calcul a été arrêté.",
             {"tested": ctx.stats.tested},
         )
     if ctx.deadline and time.monotonic() > ctx.deadline:
         raise AnalysisTimeoutError(
-            "L'analyse a dépassé la durée maximale autorisée.",
+            "Le calcul a dépassé la durée maximale autorisée. "
+            "Pour un calcul plus rapide, augmentez les valeurs Grossier, Fin et Final dans les paramètres Spencer.",
             {"tested": ctx.stats.tested, "deadline_exceeded": True},
         )
 

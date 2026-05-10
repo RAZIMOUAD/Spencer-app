@@ -105,6 +105,14 @@ export default function SlopeCanvas() {
       result: s.result,
       criticalResult: s.criticalResult,
     }));
+  const circleViewKey = criticalResult?.critical_circle
+    ? `${criticalResult.critical_circle.cx}:${criticalResult.critical_circle.cy}:${criticalResult.critical_circle.radius}`
+    : 'no-circle';
+
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [circleViewKey, slopeHeight, slopeLength]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -161,23 +169,38 @@ export default function SlopeCanvas() {
 
     if (circle) {
       const arc = slipArcPoints(circle, H, L, upstream);
-      const focusX = [upstream - Math.max(L * 0.55, H * 0.75), upstream + L + Math.max(L * 0.8, H)];
-      const focusY = [-Math.max(H * 0.55, 5), H + Math.max(H * 0.35, 3)];
+      const focusX = [
+        upstream - Math.max(L * 1.10, H * 2.0),
+        upstream + L + Math.max(L * 1.10, H * 2.0),
+      ];
+      const focusY = [
+        -Math.max(H * 0.90, 5),
+        H + Math.max(H * 1.20, L * 0.25, 4),
+      ];
       if (arc.length > 1) {
         const xsArc = arc.map(([x]) => x);
         const ysArc = arc.map(([, y]) => y);
         focusX.push(Math.min(...xsArc), Math.max(...xsArc));
         focusY.push(Math.min(...ysArc), Math.max(...ysArc));
       }
-      const marginX = Math.max(L * 0.18, H * 0.2, 2);
-      const marginY = Math.max(H * 0.16, 1.5);
+      if (circle.radius <= Math.max(4 * H, 2 * L)) {
+        focusX.push(circle.cx - circle.radius * 0.35, circle.cx + circle.radius * 0.35);
+        focusY.push(circle.cy - circle.radius * 0.35, circle.cy + circle.radius * 0.35);
+      }
+      const marginX = Math.max(L * 0.28, H * 0.6, 4);
+      const marginY = Math.max(H * 0.25, 2);
       baseXMin = Math.max(0, Math.min(...focusX) - marginX);
       baseXMax = Math.min(xTotal, Math.max(...focusX) + marginX);
       baseYMin = Math.min(...focusY) - marginY;
       baseYMax = Math.max(...focusY) + marginY;
     }
 
-    const pad = { left: 54, right: 34, top: 34, bottom: 50 };
+    const visibleXSpan = Math.max(baseXMax - baseXMin, L + H * 2);
+    const horizontalBreathing = Math.max(visibleXSpan * 0.10, H * 0.8, 3);
+    baseXMin = Math.max(0, baseXMin - horizontalBreathing);
+    baseXMax = Math.min(xTotal, baseXMax + horizontalBreathing);
+
+    const pad = { left: 78, right: 64, top: 42, bottom: 56 };
     const plotW = W - pad.left - pad.right;
     const plotH = Hpx - pad.top - pad.bottom;
     const xCenter = (baseXMin + baseXMax) / 2 + pan.x;
@@ -269,37 +292,72 @@ export default function SlopeCanvas() {
       drawLabel(ctx, 'Nappe', sx(xTotal) - 84, sy(waterTable.elevation) - 8);
     }
 
-    const slices: Slice[] = result?.slices ?? [];
-    if (slices.length > 0) {
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.38)';
-      ctx.lineWidth = 1.2;
-      slices.forEach((slc) => {
-        ctx.beginPath();
-        ctx.moveTo(sx(slc.x_left), sy(slc.y_base));
-        ctx.lineTo(sx(slc.x_left), sy(slc.y_top));
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(sx(slc.x_left), sy(slc.y_base));
-        ctx.lineTo(sx(slc.x_right), sy(slc.y_base));
-        ctx.stroke();
-      });
-    }
-
     if (circle) {
       const arc = slipArcPoints(circle, H, L, upstream);
-      if (result?.fs && isFinite(result.fs)) {
-        console.info('[SPENCER-SLOPE] FoS', result.fs.toFixed(4));
-        console.info('[SPENCER-SLOPE] Critical circle', {
-          xc: Number(circle.cx.toFixed(3)),
-          yc: Number(circle.cy.toFixed(3)),
-          R: Number(circle.radius.toFixed(3)),
-        });
-      console.info('[SPENCER-SLOPE] Slip arc points', arc.length);
-      }
+      const slices: Slice[] = result?.slices ?? [];
+
       ctx.save();
       ctx.beginPath();
       ctx.rect(pad.left, pad.top, W - pad.left - pad.right, Hpx - pad.top - pad.bottom);
       ctx.clip();
+
+      // --- 1. Fill the sliding mass (terrain surface → arc) ---
+      if (arc.length >= 2) {
+        const entry = arc[0];
+        const exit_ = arc[arc.length - 1];
+        ctx.beginPath();
+        ctx.moveTo(sx(entry[0]), sy(entry[1]));
+        const nSteps = 80;
+        for (let i = 1; i <= nSteps; i++) {
+          const xi = entry[0] + (i / nSteps) * (exit_[0] - entry[0]);
+          ctx.lineTo(sx(xi), sy(terrainY(xi, H, L, upstream)));
+        }
+        for (let i = arc.length - 1; i >= 0; i--) {
+          ctx.lineTo(sx(arc[i][0]), sy(arc[i][1]));
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(176, 137, 0, 0.10)';
+        ctx.fill();
+      }
+
+      // --- 2. Slices: left wall + inclined arc base (base follows circle geometry) ---
+      if (slices.length > 0) {
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.28)';
+        ctx.lineWidth = 1;
+        slices.forEach((slc, i) => {
+          const dxL = slc.x_left - circle.cx;
+          const dxR = slc.x_right - circle.cx;
+          const discL = circle.radius ** 2 - dxL ** 2;
+          const discR = circle.radius ** 2 - dxR ** 2;
+          if (discL < 0 || discR < 0) return;
+          const yBL = circle.cy - Math.sqrt(discL); // arc y at left edge
+          const yBR = circle.cy - Math.sqrt(discR); // arc y at right edge
+          const yTL = terrainY(slc.x_left, H, L, upstream);
+          const yTR = terrainY(slc.x_right, H, L, upstream);
+
+          // Left vertical wall
+          ctx.beginPath();
+          ctx.moveTo(sx(slc.x_left), sy(yTL));
+          ctx.lineTo(sx(slc.x_left), sy(yBL));
+          ctx.stroke();
+
+          // Inclined base following the arc
+          ctx.beginPath();
+          ctx.moveTo(sx(slc.x_left), sy(yBL));
+          ctx.lineTo(sx(slc.x_right), sy(yBR));
+          ctx.stroke();
+
+          // Right wall only on the last slice (closes the diagram)
+          if (i === slices.length - 1) {
+            ctx.beginPath();
+            ctx.moveTo(sx(slc.x_right), sy(yTR));
+            ctx.lineTo(sx(slc.x_right), sy(yBR));
+            ctx.stroke();
+          }
+        });
+      }
+
+      // --- 3. Full circle outline (dashed, light) ---
       const radiusPx = circle.radius / metresPerPixel;
       ctx.strokeStyle = 'rgba(176, 137, 0, 0.22)';
       ctx.lineWidth = 1.5;
@@ -309,6 +367,7 @@ export default function SlopeCanvas() {
       ctx.stroke();
       ctx.setLineDash([]);
 
+      // --- 4. Critical arc (solid gold, bold) ---
       ctx.strokeStyle = '#b08900';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -317,33 +376,38 @@ export default function SlopeCanvas() {
         else ctx.lineTo(sx(x), sy(y));
       });
       ctx.stroke();
+
       ctx.restore();
 
+      // --- 5. Entry / exit dots + labels ---
       if (arc.length >= 2) {
-        const endpoints = [arc[0], arc[arc.length - 1]];
-        endpoints.forEach(([x, y]) => {
+        const epData: [number, number, string, number][] = [
+          [arc[0][0], arc[0][1], 'Entrée', 12],
+          [arc[arc.length - 1][0], arc[arc.length - 1][1], 'Sortie', -74],
+        ];
+        epData.forEach(([x, y, label, offsetX]) => {
           ctx.fillStyle = '#b08900';
           ctx.beginPath();
           ctx.arc(sx(x), sy(y), 5, 0, Math.PI * 2);
           ctx.fill();
+          drawLabel(ctx, label, sx(x) + offsetX, sy(y) - 8);
         });
-        console.info('[SPENCER-SLOPE] Slip arc intersections', endpoints.map(([x, y]) => ({
-          x: Number(x.toFixed(3)),
-          y: Number(y.toFixed(3)),
-        })));
       }
 
+      // --- 6. Circle centre dot ---
       if (circle.cx >= xMin && circle.cx <= xMax && circle.cy >= yMin && circle.cy <= yMax) {
         ctx.fillStyle = '#b08900';
         ctx.beginPath();
         ctx.arc(sx(circle.cx), sy(circle.cy), 4, 0, Math.PI * 2);
         ctx.fill();
       }
-      drawLabel(ctx, 'Surface de rupture critique', sx(upstream + L * 0.18), sy(H + Math.max(0.8, H * 0.08)));
+
+      const labelX = arc.length >= 2 ? Math.min(arc[0][0] + H * 0.35, upstream + L * 0.45) : upstream + L * 0.18;
+      drawLabel(ctx, 'Surface de rupture critique', sx(labelX), sy(H + Math.max(0.8, H * 0.08)));
     }
 
     if (result?.fs && isFinite(result.fs)) {
-      drawLabel(ctx, `FoS = ${result.fs.toFixed(3)}`, sx(upstream + L * 0.1), sy(H + Math.max(1.6, H * 0.18)));
+      drawLabel(ctx, `FoS = ${result.fs.toFixed(3)}`, sx(upstream + L * 0.08), sy(H + Math.max(1.6, H * 0.18)));
     }
 
     drawLabel(ctx, `H = ${H.toFixed(2)} m`, sx(upstream * 0.16), sy(H / 2));
@@ -371,13 +435,12 @@ export default function SlopeCanvas() {
 
   const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!dragRef.current) return;
-    const dx = event.clientX - dragRef.current.x;
     const dy = event.clientY - dragRef.current.y;
     dragRef.current = { x: event.clientX, y: event.clientY };
 
-    const { xSpan, ySpan, plotW, plotH } = viewRef.current;
+    const { ySpan, plotH } = viewRef.current;
     setPan((current) => ({
-      x: current.x - (dx / plotW) * xSpan,
+      x: 0,
       y: current.y + (dy / plotH) * ySpan,
     }));
   };
@@ -406,19 +469,21 @@ export default function SlopeCanvas() {
           Recentrer
         </button>
       </div>
-      <canvas
-        ref={canvasRef}
-        width={1200}
-        height={760}
-        onWheel={handleWheel}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={stopDrag}
-        onPointerCancel={stopDrag}
-        onDoubleClick={resetView}
-        className={`min-h-0 w-full flex-1 touch-none select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-        aria-label="Profil du talus avec surface de rupture critique"
-      />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          width={1200}
+          height={760}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={stopDrag}
+          onPointerCancel={stopDrag}
+          onDoubleClick={resetView}
+          className={`h-full min-h-0 w-full touch-none select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+          aria-label="Profil du talus avec surface de rupture critique"
+        />
+      </div>
     </section>
   );
 }

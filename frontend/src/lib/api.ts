@@ -35,7 +35,7 @@ export class ApiError extends Error {
 async function apiFetch<T>(
   path: string,
   init?: RequestInit,
-  timeoutMs = 60_000,
+  timeoutMs = 300_000,
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const controller = new AbortController();
@@ -51,9 +51,9 @@ async function apiFetch<T>(
   } catch (err) {
     clearTimeout(timer);
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new ApiError('TIMEOUT', `La requête a expiré après ${timeoutMs / 1000}s. Vérifiez que le serveur backend est démarré.`);
+      throw new ApiError('TIMEOUT', `Le calcul a duré plus de ${Math.round(timeoutMs / 60000)} minutes et a été interrompu. Pour un calcul plus rapide, augmentez les valeurs "Grossier", "Fin" et "Final" dans les paramètres Spencer, ou réduisez le nombre de tranches.`);
     }
-    throw new ApiError('NETWORK_ERROR', 'Impossible de joindre le serveur. Vérifiez que le backend est démarré sur le port 8000.');
+    throw new ApiError('NETWORK_ERROR', 'Impossible de lancer le calcul. Vérifiez que les deux fenêtres de démarrage sont bien ouvertes, puis réessayez. Si le problème persiste, relancez l\'application via 2_LANCER.bat.');
   }
   clearTimeout(timer);
 
@@ -70,7 +70,7 @@ async function apiFetch<T>(
       throw new ApiError(err.code, err.message, err.details);
     }
 
-    throw new ApiError('HTTP_ERROR', `HTTP ${res.status}: ${res.statusText}`);
+    throw new ApiError('HTTP_ERROR', `Erreur de calcul (code ${res.status}). Si le problème persiste, relancez l'application.`);
   }
 
   return res.json() as Promise<T>;

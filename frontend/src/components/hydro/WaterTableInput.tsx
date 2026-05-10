@@ -1,11 +1,34 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useAnalysisStore } from '@/store/analysisStore';
+
+function parseDecimalInput(value: string) {
+  const normalized = value.replace(',', '.').trim();
+  if (normalized === '') return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export default function WaterTableInput() {
   const elevation = useAnalysisStore((s) => s.waterTable.elevation);
   const setWaterTable = useAnalysisStore((s) => s.setWaterTable);
   const enabled = elevation !== null;
+  const [draftElevation, setDraftElevation] = useState(elevation === null ? '0' : String(elevation));
+
+  useEffect(() => {
+    setDraftElevation(elevation === null ? '0' : String(elevation));
+  }, [elevation]);
+
+  const commitElevation = () => {
+    const parsed = parseDecimalInput(draftElevation);
+    if (parsed !== null) {
+      setWaterTable({ elevation: parsed });
+      setDraftElevation(String(parsed));
+      return;
+    }
+    setDraftElevation(String(elevation ?? 0));
+  };
 
   return (
     <section className="tool-panel">
@@ -34,12 +57,19 @@ export default function WaterTableInput() {
           Niveau de la nappe z (m)
           <input
             id="water-table-elevation"
-            type="number"
-            step={0.1}
-            value={elevation ?? 0}
-            onChange={(e) =>
-              { const v = parseFloat(e.target.value); if (isFinite(v)) setWaterTable({ elevation: v }); }
-            }
+            type="text"
+            inputMode="decimal"
+            value={draftElevation}
+            onChange={(e) => {
+              const next = e.target.value;
+              setDraftElevation(next);
+              const parsed = parseDecimalInput(next);
+              if (parsed !== null) setWaterTable({ elevation: parsed });
+            }}
+            onBlur={commitElevation}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
             className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
           />
         </label>

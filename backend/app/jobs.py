@@ -153,6 +153,10 @@ def _run_job_sync(
 
         settings = _internal_settings()
         search = _internal_search()
+
+        def _on_progress(batch: BatchProgress) -> None:
+            _update_job(job_id, progress=batch)
+
         best_circle, min_fs, stats = find_critical_circle(
             terrain_pts=terrain_pts,
             layers=req.layers,
@@ -160,6 +164,7 @@ def _run_job_sync(
             settings=settings,
             search=search,
             cancel_event=cancel_event,
+            on_progress=_on_progress,
         )
 
         # Full Spencer result for the critical circle

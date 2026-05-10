@@ -10,20 +10,22 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('[Spencer] Erreur React non gérée :', error);
+    console.error('[Spencer] Erreur non gérée :', error);
   }, [error]);
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 p-8">
       <div className="w-full max-w-lg rounded-xl border border-red-200 bg-red-50 p-6 shadow">
-        <p className="text-xs font-bold uppercase tracking-wide text-red-500">Erreur de l'application</p>
-        <h2 className="mt-1 text-xl font-black text-slate-950">Un problème est survenu</h2>
+        <p className="text-xs font-bold uppercase tracking-wide text-red-500">L'application a rencontré un problème</p>
+        <h2 className="mt-1 text-xl font-black text-slate-950">Un affichage inattendu s'est produit</h2>
         <p className="mt-3 text-sm font-medium text-slate-700">
-          {error.message || 'Erreur inconnue. Vérifiez la console pour les détails.'}
+          {error.message
+            ? error.message
+            : 'L\'affichage a été interrompu. Cliquez sur "Réessayer" — vos données ne sont pas perdues.'}
         </p>
-        {error.digest && (
-          <p className="mt-2 font-mono text-xs text-slate-400">Digest : {error.digest}</p>
-        )}
+        <p className="mt-3 text-xs text-slate-400">
+          Si le problème se reproduit, fermez et relancez l'application via 2_LANCER.bat.
+        </p>
       </div>
       <button
         onClick={reset}

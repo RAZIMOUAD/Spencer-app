@@ -4,9 +4,12 @@ import Navbar from '@/components/layout/Navbar';
 import Sidebar from '@/components/layout/Sidebar';
 
 export const metadata: Metadata = {
-  title: 'Spencer — Stabilité des Talus',
+  title: 'SPENCER-SLOPE',
   description:
     "Analyse de stabilité des pentes par méthode de Spencer (Eurocode 7 / EN 1997-1)",
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({

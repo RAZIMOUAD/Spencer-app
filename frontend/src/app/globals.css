@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes loading-bar {
+  0%   { left: -40%; }
+  60%  { left: 100%; }
+  100% { left: 100%; }
+}
+
 /* ---------------------------------------------------------------------------
    CSS custom properties — keep in sync with src/styles/theme.ts
    --------------------------------------------------------------------------- */

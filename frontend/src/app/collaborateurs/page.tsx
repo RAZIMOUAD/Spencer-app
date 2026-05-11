@@ -53,26 +53,6 @@ export default function CollaborateursPage() {
           ))}
         </div>
       </section>
-
-      <section className="tool-panel">
-        <div className="section-heading">
-          <h2><span className="step-badge">3</span>Plan oral conseillé</h2>
-          <span>Soutenance</span>
-        </div>
-        <div className="grid grid-cols-4 gap-3 text-sm">
-          {[
-            ['Contexte', 'Talus, stabilité, risque de glissement et besoin d’un outil de calcul lisible.'],
-            ['Méthode', 'Découpage en tranches, équilibre limite et facteur de sécurité par Spencer.'],
-            ['Application', 'Saisie des sols, nappe, maillage, visualisation et calcul du cercle critique.'],
-            ['Discussion', 'Interprétation de FS, limites du modèle et intérêt pédagogique du prototype.'],
-          ].map(([title, text]) => (
-            <div key={title} className="rounded-lg border border-slate-200 bg-white p-4">
-              <h3 className="mb-2 font-black text-slate-950">{title}</h3>
-              <p className="font-medium leading-6 text-slate-600">{text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

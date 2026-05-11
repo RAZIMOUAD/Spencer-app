@@ -2,38 +2,47 @@ const faqs = [
   {
     title: 'Résumé du projet',
     tag: 'Vue globale',
-    body: 'Spencer est une application pédagogique de stabilité des talus. Elle permet de saisir une géométrie simple, des couches de sol, une nappe phréatique et des paramètres de calcul pour obtenir un facteur de sécurité et une surface de rupture critique.',
-    points: ['Frontend Next.js pour la démonstration', 'Backend FastAPI pour les calculs', 'Méthode de Spencer appliquée aux surfaces circulaires', 'Lancement local simplifié par fichiers .bat'],
+    body: 'Ce projet consiste au développement d’une application de calcul de stabilité des talus basée sur la méthode de Spencer.',
+    points: [
+      'Définir la géométrie du talus',
+      'Ajouter plusieurs couches de sol',
+      'Activer une nappe phréatique',
+      'Générer automatiquement des surfaces de rupture',
+      'Calculer le facteur de sécurité du talus',
+      'Rechercher automatiquement le cercle critique donnant le facteur de sécurité minimal',
+    ],
   },
   {
     title: 'Pourquoi la méthode de Spencer ?',
     tag: 'Méthode',
-    body: 'La méthode de Spencer est une méthode d’équilibre limite qui vérifie la stabilité par tranches. Elle cherche un facteur de sécurité cohérent avec l’équilibre des moments et la fermeture des forces inter-tranches.',
-    points: ['Découpage automatique du massif', 'Calcul des poids, pressions interstitielles et résistances', 'Recherche automatique de la surface critique', 'Interprétation directe du facteur FS'],
+    body: 'La méthode de Spencer est une méthode d’équilibre limite reconnue pour sa précision dans l’analyse de stabilité des talus. Elle satisfait simultanément l’équilibre des forces et l’équilibre des moments.',
+    points: [
+      'Méthode précise pour les ruptures circulaires',
+      'Prise en compte des forces inter-tranches',
+      'Vérification simultanée des forces et des moments',
+      'Résultats fiables pour l’interprétation géotechnique',
+    ],
   },
   {
     title: 'Que représentent les couches de calcul ?',
     tag: 'Sol',
-    body: 'Chaque couche représente un matériau géotechnique avec son poids volumique γ, sa cohésion effective c’ et son angle de frottement φ’. Ces paramètres influencent directement la résistance au cisaillement disponible.',
-    points: ['γ contrôle le poids des tranches', 'c’ ajoute une résistance cohésive', 'φ’ contrôle la résistance par frottement', 'L’épaisseur organise la stratigraphie du talus'],
+    body: 'Les couches représentent les différentes formations géologiques du terrain. Ces paramètres influencent directement la stabilité du talus et le calcul du facteur de sécurité.',
+    points: [
+      'Poids volumique',
+      'Cohésion',
+      'Angle de frottement',
+      'Épaisseur',
+    ],
   },
   {
     title: 'Comment lire le facteur de sécurité ?',
     tag: 'Résultat',
-    body: 'Le facteur FS compare les résistances disponibles aux efforts moteurs. Plus FS est élevé, plus le talus est stable dans le modèle étudié.',
-    points: ['FS < 1 : talus instable', 'FS = 1 : état limite d’équilibre', 'FS > 1 : talus stable dans le modèle étudié', 'Toujours discuter les hypothèses de sol et de nappe'],
-  },
-  {
-    title: 'Exemple réel à présenter',
-    tag: 'Cas pratique',
-    body: 'Exemple : talus routier de 10 m de hauteur et 15 m de projection, sol argileux c’=15 kPa, φ’=25°, γ=19 kN/m³. On compare le résultat sec avec le résultat en présence d’une nappe plus haute.',
-    points: ['Cas sec : pression interstitielle faible', 'Cas humide : réduction de la contrainte effective', 'FS diminue généralement quand la nappe monte', 'Conclusion : drainage et maîtrise de l’eau sont des leviers majeurs'],
-  },
-  {
-    title: 'Ce qu’il faut dire au professeur',
-    tag: 'Soutenance',
-    body: 'Le plus important est de montrer que l’application n’est pas seulement une interface : elle relie un modèle mécanique, des entrées géotechniques et une interprétation claire pour l’ingénieur.',
-    points: ['Hypothèses affichées et contrôlables', 'Calcul reproductible localement', 'Visualisation directe du talus et du cercle critique', 'Architecture séparée : interface, API, cœur de calcul testé'],
+    body: 'Le facteur de sécurité (FoS) représente le rapport entre les forces résistantes et les forces motrices du glissement. Plus le FoS est élevé, plus le talus est stable.',
+    points: [
+      'FoS > 1 : talus stable',
+      'FoS ≈ 1 : état limite',
+      'FoS < 1 : talus instable',
+    ],
   },
 ];
 
@@ -46,8 +55,10 @@ export default function GuidePage() {
           <span>FAQ projet</span>
         </div>
         <p className="max-w-4xl text-sm font-medium leading-7 text-slate-600">
-          Cette page sert de support oral pour expliquer le projet à un professeur universitaire :
-          objectif, méthode, paramètres, interprétation et exemples concrets.
+          Cette page sert de support de présentation du projet de stabilité des talus développé
+          avec la méthode de Spencer. Elle permet de résumer les objectifs du projet, le principe
+          de calcul, les paramètres utilisés, l’interprétation des résultats ainsi que le
+          fonctionnement général du programme développé.
         </p>
       </section>
 

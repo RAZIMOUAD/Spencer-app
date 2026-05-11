@@ -28,6 +28,23 @@ function finiteThicknessSum(layers: SoilLayer[]) {
   return layers.reduce((sum, layer) => sum + (layer.thickness ?? 0), 0);
 }
 
+function withBottomSubstratum(layers: SoilLayer[]) {
+  if (layers.length === 0) return layers;
+  return layers.map((layer, index) => (
+    index === layers.length - 1
+      ? { ...layer, thickness: null }
+      : layer.thickness === null
+        ? { ...layer, thickness: 2.0 }
+        : layer
+  ));
+}
+
+function renumberAutomaticLayerNames(layers: SoilLayer[]) {
+  const allAutomatic = layers.every((layer) => /^C\d+$/.test(layer.name));
+  if (!allAutomatic) return layers;
+  return layers.map((layer, index) => ({ ...layer, name: `C${index + 1}` }));
+}
+
 function displayedThickness(layers: SoilLayer[], index: number, slopeHeight: number) {
   const previous = layers
     .slice(0, index)
@@ -50,6 +67,7 @@ function NumberInput({
   value,
   min,
   max,
+  required = true,
   disabled = false,
   onChange,
 }: {
@@ -58,6 +76,7 @@ function NumberInput({
   value: number | null;
   min?: number;
   max?: number;
+  required?: boolean;
   step: number;
   disabled?: boolean;
   onChange: (value: number) => void;
@@ -67,6 +86,16 @@ function NumberInput({
   useEffect(() => {
     setDraftValue(value === null ? '' : String(value));
   }, [value]);
+
+  const parsedDraft = parseDecimalInput(draftValue);
+  const error = (() => {
+    if (disabled) return null;
+    if (draftValue.trim() === '') return required ? 'Valeur obligatoire.' : null;
+    if (parsedDraft === null) return 'Valeur numérique invalide.';
+    if (min !== undefined && parsedDraft < min) return `Valeur minimale : ${min}.`;
+    if (max !== undefined && parsedDraft > max) return `Valeur maximale : ${max}.`;
+    return null;
+  })();
 
   const commit = () => {
     const parsed = parseDecimalInput(draftValue);
@@ -95,24 +124,51 @@ function NumberInput({
             const next = e.target.value;
             setDraftValue(next);
             const parsed = parseDecimalInput(next);
-            if (
-              parsed !== null &&
-              (min === undefined || parsed >= min) &&
-              (max === undefined || parsed <= max)
-            ) {
-              onChange(parsed);
-            }
+            if (parsed !== null) onChange(parsed);
           }}
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
-          className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100 disabled:text-slate-500"
+          className={`h-10 w-full rounded-lg border px-3 text-sm font-semibold text-slate-950 outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-500 ${
+            error
+              ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
+              : 'border-slate-300 focus:border-slate-500 focus:ring-slate-200'
+          }`}
         />
         <span className="w-14 text-xs font-bold text-slate-400">{unit}</span>
       </div>
+      {error && <span className="text-xs font-semibold text-red-600">{error}</span>}
     </label>
   );
+}
+
+function draftValidationErrors(
+  draft: DraftLayer,
+  layers: SoilLayer[],
+  slopeHeight: number,
+) {
+  const errors: string[] = [];
+  if (!draft.name.trim()) errors.push('Le nom de la couche est obligatoire.');
+  if (draft.gamma <= 0) errors.push('γ doit être supérieur à 0 kN/m³.');
+  if (draft.cohesion < 0) errors.push("c' ne peut pas être négative.");
+  if (!(draft.phi_deg > 0 && draft.phi_deg < 90)) errors.push("φ' doit être compris entre 0° et 90°.");
+
+  const draftIndex = draft.mode === 'edit' ? layers.findIndex((layer) => layer.id === draft.id) : 0;
+  const isLastLayer = draft.mode === 'edit' && draftIndex === layers.length - 1;
+  if (!isLastLayer) {
+    const otherThickness = layers.reduce((sum, layer) => (
+      layer.id === draft.id ? sum : sum + (layer.thickness ?? 0)
+    ), 0);
+    const maxThickness = Math.max(0.1, slopeHeight - otherThickness - 0.1);
+    if (draft.thickness === null || draft.thickness <= 0) {
+      errors.push("L'épaisseur doit être supérieure à 0 m.");
+    } else if (draft.thickness > maxThickness) {
+      errors.push(`L'épaisseur dépasse la hauteur disponible (${maxThickness.toFixed(2)} m max).`);
+    }
+  }
+
+  return errors;
 }
 
 export default function LayerPanel() {
@@ -137,18 +193,11 @@ export default function LayerPanel() {
     if (draft.mode === 'create') {
       const manualThickness = Math.max(0.1, draft.thickness ?? 2.0);
       const usedBeforeNewLayer = finiteThicknessSum(layers);
-      const cappedThickness = Math.min(manualThickness, Math.max(0.1, slopeHeight - usedBeforeNewLayer - 0.1));
-      const newFiniteLayer = { ...draft, thickness: cappedThickness, mode: undefined } as SoilLayer;
-      const substratumIndex = layers.findIndex((layer) => layer.thickness === null);
-
-      if (substratumIndex === -1) {
-        const newSubstratum = emptyLayer([...layers, newFiniteLayer]);
-        setLayers([...layers, newFiniteLayer, { ...newSubstratum, thickness: null }]);
-      } else {
-        const updated = [...layers];
-        updated.splice(substratumIndex, 0, newFiniteLayer);
-        setLayers(updated);
-      }
+      const availableThickness = Math.max(0.1, slopeHeight - usedBeforeNewLayer - 0.1);
+      const cappedThickness = Math.min(manualThickness, availableThickness);
+      const newTopLayer = { ...draft, thickness: cappedThickness, mode: undefined } as SoilLayer;
+      const stratigraphicLayers = withBottomSubstratum([newTopLayer, ...layers]);
+      setLayers(renumberAutomaticLayerNames(stratigraphicLayers));
     } else {
       const lastId = layers[layers.length - 1]?.id;
       setLayers(layers.map((l) => (
@@ -241,6 +290,17 @@ export default function LayerPanel() {
             </div>
 
             <div className="grid gap-4 p-5">
+              {(() => {
+                const validationErrors = draftValidationErrors(draft, layers, slopeHeight);
+                return validationErrors.length > 0 ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold leading-5 text-red-700">
+                    {validationErrors.map((error) => (
+                      <p key={error}>{error}</p>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+
               <label className="grid gap-1 text-xs font-bold text-slate-600">
                 Nom de la couche
                 <input
@@ -254,6 +314,10 @@ export default function LayerPanel() {
                 {(() => {
                   const draftIndex = draft.mode === 'edit' ? layers.findIndex((layer) => layer.id === draft.id) : layers.length;
                   const isLastLayer = draft.mode === 'edit' && draftIndex === layers.length - 1;
+                  const otherThickness = layers.reduce((sum, layer) => (
+                    layer.id === draft.id ? sum : sum + (layer.thickness ?? 0)
+                  ), 0);
+                  const maxThickness = Math.max(0.1, slopeHeight - otherThickness - 0.1);
                   const thicknessValue = isLastLayer
                     ? displayedThickness(layers, draftIndex, slopeHeight)
                     : draft.thickness ?? 2.0;
@@ -268,6 +332,7 @@ export default function LayerPanel() {
                   value={thicknessValue}
                   step={0.5}
                   min={0.1}
+                  max={isLastLayer ? undefined : maxThickness}
                   disabled={isLastLayer}
                   onChange={(v) => setDraft({ ...draft, thickness: v })}
                 />
@@ -292,7 +357,8 @@ export default function LayerPanel() {
               </button>
               <button
                 onClick={saveDraft}
-                className="h-10 rounded-lg bg-slate-950 px-5 text-sm font-black text-white hover:bg-slate-800"
+                disabled={draftValidationErrors(draft, layers, slopeHeight).length > 0}
+                className="h-10 rounded-lg bg-slate-950 px-5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Enregistrer
               </button>

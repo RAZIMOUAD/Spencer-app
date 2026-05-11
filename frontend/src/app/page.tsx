@@ -18,10 +18,12 @@ function NumberField({
   label,
   value,
   onChange,
+  error,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  error?: string | null;
 }) {
   const [draftValue, setDraftValue] = useState(String(value));
 
@@ -56,8 +58,13 @@ function NumberField({
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
         }}
-        className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+        className={`h-9 rounded-md border bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:ring-2 ${
+          error
+            ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
+            : 'border-slate-300 focus:border-slate-500 focus:ring-slate-200'
+        }`}
       />
+      {error && <span className="text-xs font-semibold text-red-600">{error}</span>}
     </label>
   );
 }
@@ -84,14 +91,27 @@ function GeometryPanel() {
   const slopeLength = useAnalysisStore((s) => s.slopeLength);
   const setSlopeHeight = useAnalysisStore((s) => s.setSlopeHeight);
   const setSlopeLength = useAnalysisStore((s) => s.setSlopeLength);
+  const ratio = slopeLength > 0 ? slopeHeight / slopeLength : Infinity;
+  const heightError = slopeHeight <= 0 ? 'La hauteur doit être supérieure à 0 m.' : null;
+  const lengthError = slopeLength <= 0 ? 'La projection doit être supérieure à 0 m.' : null;
+  const ratioError = ratio > 10
+    ? `Talus trop abrupt : H/L = ${ratio.toFixed(1)}. Maximum admis : 10.`
+    : ratio < 0.05
+      ? `Talus presque horizontal : H/L = ${ratio.toFixed(2)}. Augmentez H ou réduisez L.`
+      : null;
 
   return (
     <section id="geometry" className="tool-panel scroll-mt-5">
       <StepHeader step="1" title="Géométrie" meta="Profil 2D" />
       <div className="grid grid-cols-2 gap-3">
-        <NumberField label="Hauteur H (m)" value={slopeHeight} onChange={setSlopeHeight} />
-        <NumberField label="Projection L (m)" value={slopeLength} onChange={setSlopeLength} />
+        <NumberField label="Hauteur H (m)" value={slopeHeight} onChange={setSlopeHeight} error={heightError} />
+        <NumberField label="Projection L (m)" value={slopeLength} onChange={setSlopeLength} error={lengthError} />
       </div>
+      {ratioError && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+          {ratioError}
+        </div>
+      )}
     </section>
   );
 }

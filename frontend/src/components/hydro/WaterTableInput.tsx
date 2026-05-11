@@ -12,6 +12,7 @@ function parseDecimalInput(value: string) {
 
 export default function WaterTableInput() {
   const elevation = useAnalysisStore((s) => s.waterTable.elevation);
+  const slopeHeight = useAnalysisStore((s) => s.slopeHeight);
   const setWaterTable = useAnalysisStore((s) => s.setWaterTable);
   const enabled = elevation !== null;
   const [draftElevation, setDraftElevation] = useState(elevation === null ? '0' : String(elevation));
@@ -29,6 +30,17 @@ export default function WaterTableInput() {
     }
     setDraftElevation(String(elevation ?? 0));
   };
+  const parsedElevation = parseDecimalInput(draftElevation);
+  const elevationError = enabled && draftElevation.trim() === ''
+    ? 'Valeur obligatoire lorsque la nappe est activée.'
+    : enabled && parsedElevation === null
+      ? 'Valeur numérique invalide.'
+      : null;
+  const elevationWarning = enabled && parsedElevation !== null && (
+    parsedElevation < -slopeHeight || parsedElevation > 2 * slopeHeight
+  )
+    ? `Valeur éloignée du profil : utilisez de préférence entre ${(-slopeHeight).toFixed(1)} m et ${(2 * slopeHeight).toFixed(1)} m.`
+    : null;
 
   return (
     <section className="tool-panel">
@@ -70,8 +82,16 @@ export default function WaterTableInput() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();
             }}
-            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+            className={`h-9 rounded-md border bg-white px-3 text-sm font-medium text-slate-900 outline-none transition focus:ring-2 ${
+              elevationError
+                ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
+                : elevationWarning
+                  ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100'
+                  : 'border-slate-300 focus:border-slate-500 focus:ring-slate-200'
+            }`}
           />
+          {elevationError && <span className="text-xs font-semibold text-red-600">{elevationError}</span>}
+          {!elevationError && elevationWarning && <span className="text-xs font-semibold text-amber-700">{elevationWarning}</span>}
         </label>
       )}
     </section>

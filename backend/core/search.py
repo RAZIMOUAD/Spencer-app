@@ -135,14 +135,16 @@ def find_critical_circle(
 
     top_coarse = _top_k(candidates_1, search.top_k_coarse)
 
-    # --- Pass 2: fine neighbourhood around top_k_coarse best ---
-    # cx/cy half-range = coarse_step × 2; radius half-range = coarse_step
+    # --- Pass 2: global refinement around the best coarse candidates ---
+    # Precision = fine_step (0.1 m by default).  The local window is deliberately
+    # kept tight so academic/demo runs do not explode into hundreds of thousands
+    # of circle evaluations.
     candidates_2: list[_Candidate] = []
     for cand in top_coarse:
         candidates_2.extend(
             _batch_neighbourhood_search(
                 ctx, cand.circle,
-                xy_half=search.coarse_step * 2,
+                xy_half=search.coarse_step,
                 r_half=search.coarse_step,
                 step=search.fine_step,
             )
@@ -153,13 +155,13 @@ def find_critical_circle(
     top_fine = _top_k(candidates_2, search.top_k_fine)
 
     # --- Pass 3: final refinement around top_k_fine best ---
-    # cx/cy half-range = fine_step × 2; radius half-range = fine_step
+    # Precision = final_step (0.01 m by default).
     candidates_3: list[_Candidate] = []
     for cand in top_fine:
         candidates_3.extend(
             _batch_neighbourhood_search(
                 ctx, cand.circle,
-                xy_half=search.fine_step * 2,
+                xy_half=search.fine_step,
                 r_half=search.fine_step,
                 step=search.final_step,
             )
@@ -168,7 +170,8 @@ def find_critical_circle(
         candidates_3 = top_fine
 
     best = min(candidates_3, key=lambda c: c.fs)
-    return best.circle, best.fs, stats
+    best_circle = _normalize_circle_radius_from_intersections(best.circle, terrain_pts)
+    return best_circle, best.fs, stats
 
 
 def iter_critical_circle(
@@ -658,6 +661,39 @@ def _circle_terrain_intersections(
         if not deduped or math.hypot(x - deduped[-1][0], y - deduped[-1][1]) > 1e-4:
             deduped.append((x, y))
     return deduped
+
+
+def _radius_from_point(circle: Circle, point: tuple[float, float]) -> float:
+    """Return the geometric distance from circle centre to a point."""
+    x, y = point
+    return math.hypot(x - circle.cx, y - circle.cy)
+
+
+def _normalize_circle_radius_from_intersections(
+    circle: Circle,
+    terrain_pts: list[TerrainPoint],
+) -> Circle:
+    """
+    Recompute the final radius from the real entry/exit points.
+
+    The search grid treats radius as an independent variable. This final
+    normalization is defensive: it guarantees the API result reports a radius
+    equal to the geometric distance centre→surface point, not an accidental
+    vertical ordinate such as ``yc``.
+    """
+    intersections = _circle_terrain_intersections(circle, terrain_pts)
+    if len(intersections) < 2:
+        return circle
+
+    entry = intersections[0]
+    exit_ = intersections[-1]
+    r_entry = _radius_from_point(circle, entry)
+    r_exit = _radius_from_point(circle, exit_)
+    radius = (r_entry + r_exit) / 2.0
+
+    if not math.isfinite(radius) or radius <= 0:
+        return circle
+    return circle.model_copy(update={"radius": radius})
 
 
 def _driving_ratio(slices) -> float:

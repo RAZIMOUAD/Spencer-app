@@ -6,6 +6,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from app.schemas import Circle, TerrainPoint
 from core.search import (
     _circle_has_realistic_terrain_intersections,
+    _circle_terrain_intersections,
+    _normalize_circle_radius_from_intersections,
+    _radius_from_point,
     _search_domain,
 )
 
@@ -43,3 +46,14 @@ def test_search_domain_allows_deeper_global_radii():
     assert r_min >= 5.0
     assert r_max <= 40.0
     assert r_max > 30.0
+
+
+def test_radius_is_geometric_distance_not_center_elevation():
+    circle = Circle(cx=34.0, cy=22.0, radius=18.0)
+    normalized = _normalize_circle_radius_from_intersections(circle, _terrain())
+    intersections = _circle_terrain_intersections(normalized, _terrain())
+
+    assert len(intersections) >= 2
+    assert abs(normalized.radius - _radius_from_point(normalized, intersections[0])) < 1e-6
+    assert abs(normalized.radius - _radius_from_point(normalized, intersections[-1])) < 1e-6
+    assert normalized.radius != normalized.cy

@@ -125,7 +125,7 @@ def estimate_cost(
 
 
 def _count_candidates(H: float, search: CriticalSearchSettings) -> int:
-    """Approximate number of candidate circles the 3-pass search will evaluate."""
+    """Approximate number of candidate circles the coarse + 2-refinement search evaluates."""
     # Pass 1: coarse grid
     cx_range = 2.0 * H      # [x_crest - 0.5H, x_crest + 1.5H]
     cy_range = 2.0 * H      # [H, H + 2H]
@@ -134,12 +134,12 @@ def _count_candidates(H: float, search: CriticalSearchSettings) -> int:
     ny = max(1, int(cy_range / step) + 1)
     n_coarse = nx * ny * search.n_radii
 
-    # Pass 2: fine neighbourhood around top_k_coarse best
+    # Pass 2: 0.1 m refinement around top_k_coarse best by default
     fine_range = search.coarse_step * 2
     nf = max(1, int(fine_range / search.fine_step) + 1)
     n_fine = search.top_k_coarse * nf * nf * search.n_radii
 
-    # Pass 3: final around top_k_fine best
+    # Pass 3: 0.01 m final refinement around top_k_fine best by default
     final_range = search.fine_step * 2
     nfin = max(1, int(final_range / search.final_step) + 1)
     n_final = search.top_k_fine * nfin * nfin * search.n_radii
@@ -165,12 +165,12 @@ def _classify(score: float) -> tuple[str, str]:
 def fast_search() -> CriticalSearchSettings:
     from app.schemas import CriticalSearchSettings
     return CriticalSearchSettings(
-        coarse_step=2.0,
+        coarse_step=3.0,
         fine_step=0.5,
         final_step=0.1,
-        top_k_coarse=5,
-        top_k_fine=3,
-        n_radii=5,
+        top_k_coarse=4,
+        top_k_fine=2,
+        n_radii=4,
         min_convergence_ratio=0.1,
     )
 

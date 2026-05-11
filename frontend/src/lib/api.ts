@@ -51,7 +51,7 @@ async function apiFetch<T>(
   } catch (err) {
     clearTimeout(timer);
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new ApiError('TIMEOUT', `Le calcul a duré plus de ${Math.round(timeoutMs / 60000)} minutes et a été interrompu. Pour un calcul plus rapide, augmentez les valeurs "Grossier", "Fin" et "Final" dans les paramètres Spencer, ou réduisez le nombre de tranches.`);
+      throw new ApiError('TIMEOUT', `Le calcul a duré plus de ${Math.round(timeoutMs / 60000)} minutes et a été interrompu. Essayez une géométrie plus simple ou relancez le calcul avec moins de couches.`);
     }
     throw new ApiError('NETWORK_ERROR', 'Impossible de lancer le calcul. Vérifiez que les deux fenêtres de démarrage sont bien ouvertes, puis réessayez. Si le problème persiste, relancez l\'application via 2_LANCER.bat.');
   }

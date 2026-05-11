@@ -31,7 +31,8 @@ function ResultNotice() {
         <div><dt className="inline font-bold text-slate-700">Cercle critique</dt><dd className="inline"> : surface de rupture donnant le FoS minimal.</dd></div>
         <div><dt className="inline font-bold text-slate-700">Tranches</dt><dd className="inline"> : découpage vertical utilisé pour le calcul Spencer.</dd></div>
         <div><dt className="inline font-bold text-slate-700">Nappe</dt><dd className="inline"> : niveau d'eau qui génère les pressions interstitielles.</dd></div>
-        <div><dt className="inline font-bold text-slate-700">Cercles analysés</dt><dd className="inline"> : candidats testés pour trouver le cercle critique.</dd></div>
+        <div><dt className="inline font-bold text-slate-700">Cercles analysés</dt><dd className="inline"> : candidats testés par recherche optimisée.</dd></div>
+        <div><dt className="inline font-bold text-slate-700">Raffinement</dt><dd className="inline"> : précision locale 0,1 m puis 0,01 m autour des meilleurs cercles.</dd></div>
         <div><dt className="inline font-bold text-slate-700">Itérations</dt><dd className="inline"> : étapes numériques nécessaires à la convergence du calcul final.</dd></div>
       </dl>
     </section>
@@ -40,8 +41,8 @@ function ResultNotice() {
 
 const PHASES = [
   { until: 15,  label: 'Analyse du talus' },
-  { until: 45,  label: 'Exploration des surfaces de rupture' },
-  { until: 90,  label: 'Affinement du cercle critique' },
+  { until: 45,  label: 'Recherche globale optimisée' },
+  { until: 90,  label: 'Raffinement 0,1 m puis 0,01 m' },
   { until: Infinity, label: 'Calcul approfondi' },
 ];
 
@@ -136,7 +137,7 @@ function LoadingPanel({ progress }: { progress: BatchProgress | null }) {
         {displayElapsed >= 30 && (
           <p className="text-xs text-slate-400 leading-5 border-t border-slate-200 pt-3">
             Normal sur les grands talus — ne fermez pas cette fenêtre.
-            Pour accélérer, augmentez les valeurs Grossier / Fin / Final (étape 4).
+            Le backend limite automatiquement la recherche aux meilleurs candidats.
           </p>
         )}
       </div>
@@ -228,7 +229,7 @@ export default function ResultsSummary() {
             <p>Centre du cercle : xc = {criticalResult.critical_circle.cx.toFixed(2)} m | yc = {criticalResult.critical_circle.cy.toFixed(2)} m</p>
             <p>Rayon R : {criticalResult.critical_circle.radius.toFixed(2)} m</p>
             <p>Nombre de tranches : {result.slices?.length ?? '—'}</p>
-            <p>Cercles analysés : {criticalResult.stats.tested}</p>
+            <p>Cercles analysés : {criticalResult.stats.tested.toLocaleString()}</p>
             <p>Itérations de calcul : {result.converged ? result.iterations : 'Échec de convergence'}</p>
             <p>Temps de calcul : {result.elapsed_seconds.toFixed(1)} s</p>
           </div>

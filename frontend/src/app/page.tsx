@@ -105,7 +105,7 @@ function RunPanel() {
       <StepHeader step="4" title="Analyse automatique" meta="Cercle critique" />
       <div className="rounded-md bg-slate-50 p-3 text-sm font-medium leading-6 text-slate-600">
         Le logiciel gère automatiquement le calcul interne à partir des données
-        physiques saisies.
+        physiques saisies, avec une recherche optimisée du cercle critique.
       </div>
       <button
         onClick={runCriticalAnalysis}

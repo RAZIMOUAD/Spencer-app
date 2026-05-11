@@ -7,8 +7,9 @@ import type { SoilLayer } from '@/lib/types';
 type DraftLayer = SoilLayer & { mode: 'create' | 'edit' };
 
 function emptyLayer(existingLayers: { id: number }[]): SoilLayer {
-  const maxId = existingLayers.reduce((m, l) => Math.max(m, l.id), 0);
-  const id = maxId + 1;
+  const usedIds = new Set(existingLayers.map((layer) => layer.id));
+  let id = 1;
+  while (usedIds.has(id)) id += 1;
   return {
     id,
     name: `C${id}`,
@@ -37,12 +38,6 @@ function withBottomSubstratum(layers: SoilLayer[]) {
         ? { ...layer, thickness: 2.0 }
         : layer
   ));
-}
-
-function renumberAutomaticLayerNames(layers: SoilLayer[]) {
-  const allAutomatic = layers.every((layer) => /^C\d+$/.test(layer.name));
-  if (!allAutomatic) return layers;
-  return layers.map((layer, index) => ({ ...layer, name: `C${index + 1}` }));
 }
 
 function displayedThickness(layers: SoilLayer[], index: number, slopeHeight: number) {
@@ -105,10 +100,7 @@ function NumberInput({
     if (parsed !== null && validMin && validMax) {
       onChange(parsed);
       setDraftValue(String(parsed));
-      return;
     }
-
-    setDraftValue(value === null ? '' : String(value));
   };
 
   return (
@@ -197,7 +189,7 @@ export default function LayerPanel() {
       const cappedThickness = Math.min(manualThickness, availableThickness);
       const newTopLayer = { ...draft, thickness: cappedThickness, mode: undefined } as SoilLayer;
       const stratigraphicLayers = withBottomSubstratum([newTopLayer, ...layers]);
-      setLayers(renumberAutomaticLayerNames(stratigraphicLayers));
+      setLayers(stratigraphicLayers);
     } else {
       const lastId = layers[layers.length - 1]?.id;
       setLayers(layers.map((l) => (

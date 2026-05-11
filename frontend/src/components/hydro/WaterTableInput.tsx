@@ -26,9 +26,7 @@ export default function WaterTableInput() {
     if (parsed !== null) {
       setWaterTable({ elevation: parsed });
       setDraftElevation(String(parsed));
-      return;
     }
-    setDraftElevation(String(elevation ?? 0));
   };
   const parsedElevation = parseDecimalInput(draftElevation);
   const elevationError = enabled && draftElevation.trim() === ''

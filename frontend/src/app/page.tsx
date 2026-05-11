@@ -18,12 +18,16 @@ function NumberField({
   label,
   value,
   onChange,
-  error,
+  min,
+  max,
+  validate,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
-  error?: string | null;
+  min?: number;
+  max?: number;
+  validate?: (value: number) => string | null;
 }) {
   const [draftValue, setDraftValue] = useState(String(value));
 
@@ -31,14 +35,26 @@ function NumberField({
     setDraftValue(String(value));
   }, [value]);
 
+  const parsedDraft = parseDecimalInput(draftValue);
+  const error = (() => {
+    if (draftValue.trim() === '') return 'Valeur obligatoire.';
+    if (parsedDraft === null) return 'Valeur numérique invalide.';
+    if (min !== undefined && parsedDraft < min) return `Valeur minimale : ${min}.`;
+    if (max !== undefined && parsedDraft > max) return `Valeur maximale : ${max}.`;
+    return validate?.(parsedDraft) ?? null;
+  })();
+
   const commit = () => {
     const parsed = parseDecimalInput(draftValue);
-    if (parsed !== null && parsed > 0) {
+    if (
+      parsed !== null &&
+      (min === undefined || parsed >= min) &&
+      (max === undefined || parsed <= max) &&
+      !validate?.(parsed)
+    ) {
       onChange(parsed);
       setDraftValue(String(parsed));
-      return;
     }
-    setDraftValue(String(value));
   };
 
   return (
@@ -52,7 +68,14 @@ function NumberField({
           const next = e.target.value;
           setDraftValue(next);
           const parsed = parseDecimalInput(next);
-          if (parsed !== null && parsed > 0) onChange(parsed);
+          if (
+            parsed !== null &&
+            (min === undefined || parsed >= min) &&
+            (max === undefined || parsed <= max) &&
+            !validate?.(parsed)
+          ) {
+            onChange(parsed);
+          }
         }}
         onBlur={commit}
         onKeyDown={(e) => {
@@ -92,8 +115,6 @@ function GeometryPanel() {
   const setSlopeHeight = useAnalysisStore((s) => s.setSlopeHeight);
   const setSlopeLength = useAnalysisStore((s) => s.setSlopeLength);
   const ratio = slopeLength > 0 ? slopeHeight / slopeLength : Infinity;
-  const heightError = slopeHeight <= 0 ? 'La hauteur doit être supérieure à 0 m.' : null;
-  const lengthError = slopeLength <= 0 ? 'La projection doit être supérieure à 0 m.' : null;
   const ratioError = ratio > 10
     ? `Talus trop abrupt : H/L = ${ratio.toFixed(1)}. Maximum admis : 10.`
     : ratio < 0.05
@@ -104,8 +125,8 @@ function GeometryPanel() {
     <section id="geometry" className="tool-panel scroll-mt-5">
       <StepHeader step="1" title="Géométrie" meta="Profil 2D" />
       <div className="grid grid-cols-2 gap-3">
-        <NumberField label="Hauteur H (m)" value={slopeHeight} onChange={setSlopeHeight} error={heightError} />
-        <NumberField label="Projection L (m)" value={slopeLength} onChange={setSlopeLength} error={lengthError} />
+        <NumberField label="Hauteur H (m)" value={slopeHeight} onChange={setSlopeHeight} min={0.1} />
+        <NumberField label="Projection L (m)" value={slopeLength} onChange={setSlopeLength} min={0.1} />
       </div>
       {ratioError && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
